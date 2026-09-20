@@ -1,0 +1,25 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a3c1ed5f7643a4443be190aa50cd687b, type: 3}
+  m_Name: Mention
+  m_EditorClassIdentifier: TimboJimbo.UI.Text.Samples.Chat::TimboJimbo.UI.Text.Samples.Chat.MentionHandler
+  _kind: mention
+  _trigger:
+    Kind: 1
+    Open: '@'
+    Close: 
+  _placement: 1
+  _prefab: {fileID: 1958484420936142574, guid: 597e68daf8feb47459ac745d3d35bb76, type: 3}
+  _font: {fileID: 0}
+  _labelScale: 0.9
+  _chipPaddingEm: 0.3
+  _heightEm: 1.2

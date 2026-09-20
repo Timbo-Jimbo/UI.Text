@@ -1,0 +1,29 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e48a7a2ef1efa6b42a0efa958d4de3c0, type: 3}
+  m_Name: Emotes
+  m_EditorClassIdentifier: TimboJimbo.UI.Text.Samples.Chat::TimboJimbo.UI.Text.Samples.Chat.EmoteHandler
+  _kind: emote
+  _trigger:
+    Kind: 0
+    Open: ':'
+    Close: ':'
+  _placement: 1
+  _prefab: {fileID: 7119815772246618363, guid: 03e9531e666d12b46b36319985f7be5b, type: 3}
+  _sizeEm: 1.25
+  _emotes:
+  - Name: smile
+    Sprite: {fileID: 21300000, guid: 65b7fb3de391d9b4c9eb9c536f174c99, type: 3}
+  - Name: heart
+    Sprite: {fileID: 21300000, guid: 7457bc0e67e19f843900ece374a53a90, type: 3}
+  - Name: star
+    Sprite: {fileID: 21300000, guid: 845a07215d9ebb74893432c801eaed71, type: 3}

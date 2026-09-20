@@ -1,0 +1,28 @@
+{
+	"name": "com.timbojimbo.ui.text",
+	"displayName": "UI Text",
+	"version": "0.1.0",
+	"unity": "6000.5",
+	"unityRelease": "0f1",
+	"description": "A UGUI text component rendered by Unity's Advanced Text Generator: HarfBuzz shaping, ICU line breaking and bidi, OS font fallback and colour emoji, with no native plugins. Markdown, font stacks and inline prefabs; backgrounds drawn with the UI package's Box.",
+	"dependencies": {
+		"com.unity.ugui": "2.0.0",
+		"com.timbojimbo.ui": "0.1.0",
+		"com.unity.test-framework": "1.6.0"
+	},
+	"samples": [
+		{
+			"displayName": "Chat",
+			"description": "A chat feed with a theme, an emote set (:smile:), a mention chip (@name) with a nested TextBlock, a monospace font stack for code and a scene.",
+			"path": "Samples~/Chat"
+		}
+	],
+	"author": {
+		"name": "Timbo Jimbo",
+		"url": "https://timbojimbo.com",
+		"email": "hello@timbojimbo.com"
+	},
+	"changelogUrl": "https://github.com/Timbo-Jimbo/UI.Text/blob/main/com.timbojimbo.ui.text/CHANGELOG.md",
+	"documentationUrl": "https://github.com/Timbo-Jimbo/UI.Text#readme",
+	"licensesUrl": "https://github.com/Timbo-Jimbo/UI.Text/blob/main/LICENSE"
+}
