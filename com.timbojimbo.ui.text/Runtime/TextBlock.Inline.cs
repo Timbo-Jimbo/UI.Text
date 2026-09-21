@@ -41,18 +41,17 @@ namespace TimboJimbo.UI.Text
         // once the loop has finished; a forced canvas update then lets the new objects draw in the same frame.
 
         /// <summary>Converts the layout's placement requests to canvas units and queues them for after the rebuild.</summary>
-        private void QueueInlineContent(float scale)
+        private void QueueInlineContent()
         {
             _pending.Clear();
             if (_richText)
             {
                 var context = new InlineContext(this, _fontSize, color);
                 _layout.CollectPlacements(in context, s_Placements);
-                float inverseScale = 1f / scale;
                 for (int i = 0; i < s_Placements.Count; i++)
                 {
                     var p = s_Placements[i];
-                    var fragment = new InlineFragment(Scale(p.Px, inverseScale), p.Index, p.Count, p.BaselinePx * inverseScale, p.AscentPx * inverseScale, p.DescentPx * inverseScale);
+                    var fragment = new InlineFragment(p.Px, p.Index, p.Count, p.BaselinePx, p.AscentPx, p.DescentPx);
                     _pending.Add(new PendingPlacement { Prefab = p.Prefab, BelowGlyphs = p.BelowGlyphs, Token = Document.Tokens[p.TokenIndex], Context = context, Fragment = fragment });
                 }
                 s_Placements.Clear();
@@ -126,7 +125,6 @@ namespace TimboJimbo.UI.Text
             return changed;
         }
 
-        private static Rect Scale(Rect px, float inverseScale) => new(px.x * inverseScale, px.y * inverseScale, px.width * inverseScale, px.height * inverseScale);
 
         private void Place(GameObject prefab, RectTransform container, in InlineToken token, in InlineContext context, in InlineFragment fragment)
         {

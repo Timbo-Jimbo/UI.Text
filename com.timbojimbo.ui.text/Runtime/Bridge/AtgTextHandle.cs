@@ -58,7 +58,7 @@ namespace TimboJimbo.UI.Text.Bridge
             IsElided = false;
             SizePx = Vector2.zero;
 
-            if (string.IsNullOrEmpty(settings.Text))
+            if (string.IsNullOrEmpty(settings.Text) || AtgEngine.IsShuttingDown)
                 return false;
             if (!Convert(ref settings, out var font, out var fallbacks))
                 return false;
@@ -155,7 +155,7 @@ namespace TimboJimbo.UI.Text.Bridge
         /// <summary>The size the text would take with the given settings, in pixels. Unconstrained dimensions grow to fit.</summary>
         public Vector2 MeasurePx(ref AtgTextSettings settings)
         {
-            if (string.IsNullOrEmpty(settings.Text) || !Convert(ref settings, out var font, out var fallbacks))
+            if (string.IsNullOrEmpty(settings.Text) || AtgEngine.IsShuttingDown || !Convert(ref settings, out var font, out var fallbacks))
                 return Vector2.zero;
             AtgFontAssets.Prepare(font);
             _native.textSettings = fallbacks.Native;

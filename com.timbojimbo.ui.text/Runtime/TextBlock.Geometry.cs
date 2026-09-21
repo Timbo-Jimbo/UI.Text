@@ -33,18 +33,17 @@ namespace TimboJimbo.UI.Text
             s_Materials.Clear();
         }
 
-        private void BuildGeometry(float scale)
+        private void BuildGeometry()
         {
             // Vertices live in the glyph child's local space, which shares our rect but not necessarily our pivot.
             var rect = _glyphs.GetPixelAdjustedRect();
-            // Layout space is pixels, origin top-left, y down. Canvas space is rect units, y up.
-            float inverseScale = 1f / scale;
+            // Layout space is canvas units, origin top-left, y down. Canvas space is rect units, y up.
             float left = rect.xMin;
             float top = rect.yMax;
             Color32 tint = color;
             GetComponents(s_GlyphModifiers);
 
-            BuildDecorations(left, top, inverseScale, tint);
+            BuildDecorations(left, top, tint);
 
             var handle = _layout.Handle;
             var glyph = new TextBlockGlyph();
@@ -67,10 +66,10 @@ namespace TimboJimbo.UI.Text
                     glyph.Index = glyphIndex++;
                     glyph.GlyphId = quad.GlyphId;
                     glyph.IsBitmap = group.IsBitmap;
-                    glyph.BottomLeft = ToVertex(in quad.BottomLeft, left, top, inverseScale, tint, group.IsBitmap, dilateScale);
-                    glyph.TopLeft = ToVertex(in quad.TopLeft, left, top, inverseScale, tint, group.IsBitmap, dilateScale);
-                    glyph.TopRight = ToVertex(in quad.TopRight, left, top, inverseScale, tint, group.IsBitmap, dilateScale);
-                    glyph.BottomRight = ToVertex(in quad.BottomRight, left, top, inverseScale, tint, group.IsBitmap, dilateScale);
+                    glyph.BottomLeft = ToVertex(in quad.BottomLeft, left, top, tint, group.IsBitmap, dilateScale);
+                    glyph.TopLeft = ToVertex(in quad.TopLeft, left, top, tint, group.IsBitmap, dilateScale);
+                    glyph.TopRight = ToVertex(in quad.TopRight, left, top, tint, group.IsBitmap, dilateScale);
+                    glyph.BottomRight = ToVertex(in quad.BottomRight, left, top, tint, group.IsBitmap, dilateScale);
                     for (int m = 0; m < s_GlyphModifiers.Count; m++)
                         s_GlyphModifiers[m].ModifyGlyph(this, ref glyph);
 
@@ -82,7 +81,7 @@ namespace TimboJimbo.UI.Text
         }
 
         /// <summary>Underlines and strikethroughs as solid quads in their own group, drawn before the glyphs.</summary>
-        private void BuildDecorations(float left, float top, float inverseScale, Color32 tint)
+        private void BuildDecorations(float left, float top, Color32 tint)
         {
             var decorations = _layout.Decorations;
             if (decorations.Count == 0)
@@ -92,18 +91,18 @@ namespace TimboJimbo.UI.Text
             for (int i = 0; i < decorations.Count; i++)
             {
                 var quad = decorations[i];
-                AddSolidQuad(triangles, quad.Px, left, top, inverseScale, Multiply(quad.Color, tint, false));
+                AddSolidQuad(triangles, quad.Px, left, top, Multiply(quad.Color, tint, false));
             }
             s_GroupTriangles.Add(triangles);
             s_Materials.Add(GetMaterial(AtgSpriteAssets.SolidTexture, false));
         }
 
-        private static void AddSolidQuad(List<int> triangles, Rect px, float left, float top, float inverseScale, Color32 color)
+        private static void AddSolidQuad(List<int> triangles, Rect px, float left, float top, Color32 color)
         {
-            var bl = Solid(left + px.xMin * inverseScale, top - px.yMax * inverseScale, color);
-            var tl = Solid(left + px.xMin * inverseScale, top - px.yMin * inverseScale, color);
-            var tr = Solid(left + px.xMax * inverseScale, top - px.yMin * inverseScale, color);
-            var br = Solid(left + px.xMax * inverseScale, top - px.yMax * inverseScale, color);
+            var bl = Solid(left + px.xMin, top - px.yMax, color);
+            var tl = Solid(left + px.xMin, top - px.yMin, color);
+            var tr = Solid(left + px.xMax, top - px.yMin, color);
+            var br = Solid(left + px.xMax, top - px.yMax, color);
             AddQuad(triangles, in bl, in tl, in tr, in br);
         }
 
@@ -114,6 +113,7 @@ namespace TimboJimbo.UI.Text
             v.color = color;
             v.uv0 = new Vector2(0.5f, 0.5f);
             v.uv1 = Vector4.zero;
+            v.uv2 = Vector4.zero;
             return v;
         }
 
@@ -128,16 +128,17 @@ namespace TimboJimbo.UI.Text
             triangles.Add(v + 2); triangles.Add(v + 3); triangles.Add(v);
         }
 
-        private static UIVertex ToVertex(in AtgVertex vertex, float left, float top, float inverseScale, Color32 tint, bool colorGlyph, float dilateScale)
+        private static UIVertex ToVertex(in AtgVertex vertex, float left, float top, Color32 tint, bool colorGlyph, float dilateScale)
         {
             // Colour bitmaps carry their own colour; the vertex only contributes alpha.
             Color32 c = colorGlyph ? new Color32(255, 255, 255, vertex.Color.a) : vertex.Color;
             var result = UIVertex.simpleVert;
-            result.position = new Vector3(left + vertex.Position.x * inverseScale, top - vertex.Position.y * inverseScale, 0f);
+            result.position = new Vector3(left + vertex.Position.x, top - vertex.Position.y, 0f);
             result.color = Multiply(c, tint, colorGlyph);
             result.uv0 = vertex.Uv;
             // uv1.x carries the synthetic bold dilation in field units; the SDF shader reads it.
             result.uv1 = new Vector4(vertex.Dilate * dilateScale, 0f, 0f, 0f);
+            result.uv2 = Vector4.zero;
             return result;
         }
 

@@ -37,8 +37,8 @@ namespace TimboJimbo.UI.Text
         /// <summary>The box to lay out in. A negative width or height is unconstrained.</summary>
         public float WidthPx;
         public float HeightPx;
-        /// <summary>Layout pixels per canvas unit, for the one-unit anti-aliasing margin around glyphs.</summary>
-        public float PixelsPerUnit;
+        /// <summary>Room around every glyph quad for anti-aliasing, in layout pixels: one device pixel's worth.</summary>
+        public float AntiAliasMarginPx;
         public bool WordWrap;
         public TextAnchor Alignment;
         public TextBlockOverflow Overflow;
@@ -61,7 +61,7 @@ namespace TimboJimbo.UI.Text
             FontSizePx = 24f,
             WidthPx = -1f,
             HeightPx = -1f,
-            PixelsPerUnit = 1f,
+            AntiAliasMarginPx = 1f,
             WordWrap = true,
             Alignment = TextAnchor.UpperLeft,
         };
@@ -172,8 +172,8 @@ namespace TimboJimbo.UI.Text
             }
 
             ApplyOverflow(ref settings, in input);
-            // One canvas unit of room around every glyph for anti-aliasing, capped at what the atlas can represent.
-            settings.VertexPaddingPx = _baseFont != null ? Mathf.Min(input.PixelsPerUnit, AtgFontAssets.MaxPaddingPx(_baseFont, input.FontSizePx)) : input.PixelsPerUnit;
+            // Room around every glyph for anti-aliasing, capped at what the atlas can represent.
+            settings.VertexPaddingPx = _baseFont != null ? Mathf.Min(input.AntiAliasMarginPx, AtgFontAssets.MaxPaddingPx(_baseFont, input.FontSizePx)) : input.AntiAliasMarginPx;
 
             _generated = _handle.Generate(ref settings);
             if (!_generated)

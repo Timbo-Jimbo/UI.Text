@@ -4,7 +4,8 @@
     "references": [
         "UnityEngine.TextCore.Tools",
         "UnityEngine.UI",
-        "TimboJimbo.UI.Runtime"
+        "TimboJimbo.UI.Runtime",
+        "TimboJimbo.UI.Layout.Runtime"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
@@ -13,6 +14,12 @@
     "precompiledReferences": [],
     "autoReferenced": true,
     "defineConstraints": [],
-    "versionDefines": [],
+    "versionDefines": [
+        {
+            "name": "com.timbojimbo.ui.layout",
+            "expression": "0.1.0",
+            "define": "TJ_TEXT_LAYOUT"
+        }
+    ],
     "noEngineReferences": false
 }

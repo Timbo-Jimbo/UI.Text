@@ -14,6 +14,15 @@ namespace TimboJimbo.UI.Text.Bridge
         private const string IcuDataAssetName = "icudt73l.bytes";
 
         private static TextLib s_Lib;
+        private static bool s_shuttingDown;
+
+        /// <summary>
+        /// True once the domain is being torn down (an assembly reload in the editor, or the application quitting).
+        /// The native engine and the font assets it reads go away in that phase while the editor still flushes
+        /// canvases (closing the Scene View's preview scene flushes an undo record, which forces a canvas update
+        /// that rebuilds dirty texts), so no text may be generated or measured after this turns true.
+        /// </summary>
+        public static bool IsShuttingDown => s_shuttingDown;
 
         /// <summary>
         /// Creates the generator if needed. <paramref name="icuData"/> is the ICU asset a component carries into
@@ -29,6 +38,11 @@ namespace TimboJimbo.UI.Text.Bridge
             if (icu == null)
                 Debug.LogWarning("[UI.Text] ICU data asset not found: falling back to basic line breaking.");
             s_Lib = new TextLib(icu != null ? icu.bytes : Array.Empty<byte>());
+
+            Application.quitting += () => s_shuttingDown = true;
+#if UNITY_EDITOR
+            UnityEditor.AssemblyReloadEvents.beforeAssemblyReload += () => s_shuttingDown = true;
+#endif
         }
 
         internal static TextLib Lib

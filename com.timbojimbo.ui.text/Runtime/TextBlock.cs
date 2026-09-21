@@ -57,6 +57,8 @@ namespace TimboJimbo.UI.Text
         private RectTransform _decorations;
         private RectTransform _objects;
         private bool _measuresDirty = true;
+        private bool _longestWordDirty = true;
+        private float _longestWord;
         private float _measuredForWidth = float.NaN;
         private float _preferredWidth;
         private float _preferredHeight;
@@ -185,6 +187,16 @@ namespace TimboJimbo.UI.Text
         /// <summary>The layout behind this text: the parsed document, the laid-out text and its queries, as of the last rebuild.</summary>
         public TextLayout Layout => _layout;
 
+        /// <summary>Marks every loaded text for a rebuild, for project-wide settings that change how texts draw.</summary>
+        public static void RebuildAll()
+        {
+            foreach (var text in FindObjectsByType<TextBlock>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                text.MarkTextChanged();
+                text.SetMaterialDirty();
+            }
+        }
+
         /// <summary>The parsed form of the current text (lines, runs, links and tokens, in source indices) as of the last rebuild.</summary>
         public TextDocument Document => _layout.Document;
 
@@ -254,6 +266,7 @@ namespace TimboJimbo.UI.Text
         public void CalculateLayoutInputHorizontal() { }
         public void CalculateLayoutInputVertical() { }
 
+        // ILayoutElement answers for the width on the transform, cached until the text or that width changes.
         private void EnsureMeasures()
         {
             float width = rectTransform.rect.width;
@@ -261,10 +274,48 @@ namespace TimboJimbo.UI.Text
                 return;
             _measuresDirty = false;
             _measuredForWidth = width;
-            var theme = EffectiveTheme;
-            _preferredWidth = Measure(_text, _font, _fontSize, -1f, _wordWrap, _bold, _italic, _richText, theme).x;
-            _preferredHeight = Measure(_text, _font, _fontSize, _wordWrap ? width : -1f, _wordWrap, _bold, _italic, _richText, theme).y;
+            _preferredWidth = MeasureInUnits(-1f).x;
+            _preferredHeight = MeasureInUnits(_wordWrap ? width : -1f).y;
         }
+
+        // Layout is done in canvas units, never in device pixels: the same numbers measure the text and place its
+        // glyphs, at every canvas scale, so what the layout was told fits is what is drawn. The canvas scale only
+        // sizes the anti-aliasing margin of the quads.
+
+        /// <summary>The size of this text laid out at a width in canvas units (negative for unconstrained), in canvas units.</summary>
+        private Vector2 MeasureInUnits(float widthUnits) => MeasureInUnits(_text, widthUnits);
+
+        private Vector2 MeasureInUnits(string text, float widthUnits)
+            => Measure(text, _font, _fontSize, widthUnits < 0f ? -1f : widthUnits, _wordWrap, _bold, _italic, _richText, EffectiveTheme);
+
+        /// <summary>
+        /// The widest whitespace-separated run of the text, in canvas units: how narrow a wrapped text can go
+        /// before words themselves would break. Measured per word, so it is cached until the text changes.
+        /// </summary>
+        private float LongestWordWidth()
+        {
+            if (!_longestWordDirty)
+                return _longestWord;
+            _longestWordDirty = false;
+            _longestWord = 0f;
+            if (!string.IsNullOrEmpty(_text))
+            {
+                foreach (var word in _text.Split((char[])null, System.StringSplitOptions.RemoveEmptyEntries))
+                    _longestWord = Mathf.Max(_longestWord, MeasureInUnits(word, -1f).x);
+            }
+            return _longestWord;
+        }
+
+#if TJ_TEXT_LAYOUT
+        // ---- ILayoutMeasurable (UI Layout package) ----
+
+        /// <summary>The content of a LayoutNode: the text's size at the width the layout offers, as a pure measure.</summary>
+        Vector2 TimboJimbo.UI.Layout.ILayoutMeasurable.Measure(float availableWidth)
+            => MeasureInUnits(_wordWrap ? availableWidth : -1f);
+
+        /// <summary>The longest unbreakable run, so a wrapped text is never squeezed narrower than its longest word.</summary>
+        float TimboJimbo.UI.Layout.ILayoutMeasurable.MinWidth => _wordWrap ? LongestWordWidth() : MeasureInUnits(-1f).x;
+#endif
 
         // ---- Lifecycle ----
 
@@ -315,6 +366,7 @@ namespace TimboJimbo.UI.Text
             _fontSize = Mathf.Max(1f, _fontSize);
             _maxLines = Mathf.Max(0, _maxLines);
             _measuresDirty = true;
+            _longestWordDirty = true;
             base.OnValidate();
         }
 
@@ -328,6 +380,7 @@ namespace TimboJimbo.UI.Text
         private void MarkTextChanged()
         {
             _measuresDirty = true;
+            _longestWordDirty = true;
             SetVerticesDirty();
             SetLayoutDirty();
         }
@@ -335,6 +388,7 @@ namespace TimboJimbo.UI.Text
         public override void SetVerticesDirty()
         {
             _measuresDirty = true;
+            _longestWordDirty = true;
             base.SetVerticesDirty();
         }
 
@@ -395,11 +449,10 @@ namespace TimboJimbo.UI.Text
                 return;
             _layout.GetSourceRangeRects(start, end, s_Rects);
             var rect = _glyphs.GetPixelAdjustedRect();
-            float inverseScale = 1f / CanvasScale;
             for (int i = 0; i < s_Rects.Count; i++)
             {
                 var r = s_Rects[i];
-                results.Add(new Rect(rect.xMin + r.xMin * inverseScale, rect.yMax - r.yMax * inverseScale, r.width * inverseScale, r.height * inverseScale));
+                results.Add(new Rect(rect.xMin + r.xMin, rect.yMax - r.yMax, r.width, r.height));
             }
         }
 
@@ -413,9 +466,7 @@ namespace TimboJimbo.UI.Text
             if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(_glyphs.rectTransform, eventData.position, eventCamera, out var local))
                 return;
             var rect = _glyphs.GetPixelAdjustedRect();
-            float scale = CanvasScale;
-            var pointPx = new Vector2((local.x - rect.xMin) * scale, (rect.yMax - local.y) * scale);
-            int link = _layout.LinkAt(pointPx);
+            int link = _layout.LinkAt(new Vector2(local.x - rect.xMin, rect.yMax - local.y));
             if (link < 0)
                 return;
             var href = Document.Links[link].Href;
@@ -443,13 +494,12 @@ namespace TimboJimbo.UI.Text
             EnsureChildren();
             ClearGeometry();
 
-            float scale = CanvasScale;
-            if (Generate(scale))
-                BuildGeometry(scale);
+            if (Generate())
+                BuildGeometry();
             _glyphs.Apply(s_Positions, s_Colors, s_Uv0, s_Uv1, s_GroupTriangles, s_Materials);
 
             // Inline prefabs are enabled after UGUI's rebuild loop, which forbids it while running.
-            QueueInlineContent(scale);
+            QueueInlineContent();
         }
 
         private float CanvasScale
@@ -461,26 +511,30 @@ namespace TimboJimbo.UI.Text
             }
         }
 
-        private bool Generate(float scale)
+        private bool Generate()
         {
-            var rect = GetPixelAdjustedRect();
+            // The layout gets the rect as sized, not the pixel-adjusted one: on a pixel-perfect canvas the
+            // adjustment can take up to a pixel off the width a text was measured to fit exactly, and the
+            // last word would wrap. The geometry is placed on the adjusted rect.
+            var rect = rectTransform.rect;
             var input = TextLayoutInput.Default;
             input.Text = _text;
             input.RichText = _richText;
             input.Font = _font;
             input.Theme = EffectiveTheme;
-            input.FontSizePx = _fontSize * scale;
-            input.WidthPx = rect.width * scale;
-            input.HeightPx = rect.height * scale;
-            input.PixelsPerUnit = scale;
+            input.FontSizePx = _fontSize;
+            input.WidthPx = rect.width;
+            input.HeightPx = rect.height;
+            // The anti-aliasing margin is one device pixel, expressed in canvas units.
+            input.AntiAliasMarginPx = 1f / CanvasScale;
             input.WordWrap = _wordWrap;
             input.Alignment = _alignment;
             input.Overflow = _overflow;
             input.MaxLines = _maxLines;
             input.Direction = _direction;
-            input.CharacterSpacingPx = _characterSpacing * scale;
-            input.WordSpacingPx = _wordSpacing * scale;
-            input.ParagraphSpacingPx = _paragraphSpacing * scale;
+            input.CharacterSpacingPx = _characterSpacing;
+            input.WordSpacingPx = _wordSpacing;
+            input.ParagraphSpacingPx = _paragraphSpacing;
             input.Bold = _bold;
             input.Italic = _italic;
             input.Underline = _underline;
@@ -490,4 +544,11 @@ namespace TimboJimbo.UI.Text
             return _layout.Generate(in input, in context);
         }
     }
+
+#if TJ_TEXT_LAYOUT
+    // With the UI Layout package present a TextBlock is a LayoutNode's content directly; see the measure above.
+    public sealed partial class TextBlock : TimboJimbo.UI.Layout.ILayoutMeasurable
+    {
+    }
+#endif
 }

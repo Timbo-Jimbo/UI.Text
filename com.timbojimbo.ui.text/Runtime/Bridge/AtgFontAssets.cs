@@ -105,10 +105,13 @@ namespace TimboJimbo.UI.Text.Bridge
             if (asset.faceInfo.pointSize > 0 && IsDynamic(asset))
             {
                 asset.TryAddCharacters("  ", out _);
-                var table = asset.characterLookupTable;
-                if (table != null && (table.TryGetValue(0x00A0, out var character) || table.TryGetValue(0x0020, out character)) && character?.glyph != null)
+                uint index = asset.GetGlyphIndex(0x00A0);
+                if (index == 0)
+                    index = asset.GetGlyphIndex(0x0020);
+                var glyph = index != 0 ? asset.GetGlyphInCache(index) : null;
+                if (glyph != null)
                 {
-                    float advance = character.glyph.metrics.horizontalAdvance / asset.faceInfo.pointSize;
+                    float advance = glyph.metrics.horizontalAdvance / asset.faceInfo.pointSize;
                     if (advance > 0.01f)
                         em = advance;
                 }
