@@ -1,3 +1,4 @@
+#if TJ_TEXT_UI
 using TimboJimbo.UI.Text.Markup;
 using TimboJimbo.UI;
 using UnityEngine;
@@ -45,3 +46,4 @@ namespace TimboJimbo.UI.Text
         }
     }
 }
+#endif

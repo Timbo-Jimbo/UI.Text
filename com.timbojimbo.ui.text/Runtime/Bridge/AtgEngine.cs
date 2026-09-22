@@ -39,9 +39,13 @@ namespace TimboJimbo.UI.Text.Bridge
                 Debug.LogWarning("[UI.Text] ICU data asset not found: falling back to basic line breaking.");
             s_Lib = new TextLib(icu != null ? icu.bytes : Array.Empty<byte>());
 
-            Application.quitting += () => s_shuttingDown = true;
+            // In the editor Application.quitting means play mode is ending, not that the domain is going away, and
+            // with domain reload disabled the flag would then outlive the play session; the reload event is the
+            // teardown signal there.
 #if UNITY_EDITOR
             UnityEditor.AssemblyReloadEvents.beforeAssemblyReload += () => s_shuttingDown = true;
+#else
+            Application.quitting += () => s_shuttingDown = true;
 #endif
         }
 

@@ -188,7 +188,7 @@ namespace TimboJimbo.UI.Text
         public TextLayout Layout => _layout;
 
         /// <summary>Marks every loaded text for a rebuild, for project-wide settings that change how texts draw.</summary>
-        public static void RebuildAll()
+        internal static void RebuildAll()
         {
             foreach (var text in FindObjectsByType<TextBlock>(FindObjectsInactive.Include, FindObjectsSortMode.None))
             {

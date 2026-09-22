@@ -19,6 +19,11 @@
             "name": "com.timbojimbo.ui.layout",
             "expression": "0.1.0",
             "define": "TJ_TEXT_LAYOUT"
+        },
+        {
+            "name": "com.timbojimbo.ui",
+            "expression": "0.1.0",
+            "define": "TJ_TEXT_UI"
         }
     ],
     "noEngineReferences": false
