@@ -10,12 +10,18 @@ namespace TimboJimbo.UI.Text
     /// An ordered list of fonts: the first that resolves is the primary font and the rest are tried, in order,
     /// for any glyph it lacks. With OS Fallbacks on, the fonts the OS names for missing glyphs come after the
     /// stack, so a stack only needs to list what should win over them. A stack with no sources draws with the
-    /// OS default font, which is what texts without a stack use (<see cref="Default"/>).
+    /// OS default font, which is what texts without a stack use (<see cref="Default"/>). The Emoji fonts are
+    /// consulted first for characters Unicode defines as emoji, before the stack and the OS: for colour emoji that
+    /// look the same everywhere, and on devices whose own emoji font the engine cannot draw (Android 13 and later
+    /// ship only a COLRv1 emoji font, which FreeType does not rasterise; a bundled bitmap font such as the CBDT
+    /// build of Noto Color Emoji works everywhere).
     /// </summary>
     [CreateAssetMenu(menuName = "Timbo Jimbo/UI/Font Stack", fileName = "FontStack")]
     public sealed class FontStack : ScriptableObject
     {
         [SerializeField] private List<FontSource> _sources = new();
+        [Tooltip("Fonts consulted first for emoji, before the sources and the OS fonts. A colour font imported into the project (such as the CBDT build of Noto Color Emoji) draws emoji on every platform, where the OS's own emoji font may not be one the engine can draw.")]
+        [SerializeField] private List<FontSource> _emoji = new();
         [Tooltip("Consult the fonts the OS names for missing glyphs (emoji, other scripts) after this stack's own sources. Off makes the stack self-contained and never touches the OS fonts.")]
         [SerializeField] private bool _osFallbacks = true;
 
@@ -26,6 +32,9 @@ namespace TimboJimbo.UI.Text
         private static FontStack s_Default;
 
         public List<FontSource> Sources => _sources;
+
+        /// <summary>The fonts consulted first for emoji; call <see cref="Invalidate"/> after changing the list.</summary>
+        public List<FontSource> Emoji => _emoji;
 
         /// <summary>Whether the OS fallback fonts are consulted after this stack's sources.</summary>
         public bool OsFallbacks
@@ -79,6 +88,8 @@ namespace TimboJimbo.UI.Text
         {
             foreach (var source in _sources)
                 source?.Invalidate();
+            foreach (var source in _emoji)
+                source?.Invalidate();
             _primary = null;
             _fallbacks?.Dispose();
             _fallbacks = null;
@@ -104,8 +115,16 @@ namespace TimboJimbo.UI.Text
             }
             if (_primary == null && _osFallbacks)
                 _primary = AtgFallbackSet.DefaultFont;
+            var emoji = new List<UnityEngine.TextCore.Text.TextAsset>();
+            foreach (var source in _emoji)
+            {
+                var asset = source?.Resolve();
+                if (asset != null)
+                    emoji.Add(asset);
+            }
             _fallbacks = new AtgFallbackSet(name) { IncludeOsFallbacks = _osFallbacks };
             _fallbacks.SetFonts(rest);
+            _fallbacks.SetEmojiAssets(emoji);
         }
 
         private void OnDisable() => Invalidate();

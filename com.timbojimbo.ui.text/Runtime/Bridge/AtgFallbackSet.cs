@@ -94,6 +94,9 @@ namespace TimboJimbo.UI.Text.Bridge
                 {
                     s_Settings.fallbackFontAssets = _fonts;
                     s_Settings.emojiFallbackTextAssets = _emoji;
+                    // The engine only consults the emoji assets with emoji support on; off (its default) leaves
+                    // emoji to the ordinary fallbacks, as a set without emoji assets has always had them.
+                    s_Settings.enableEmojiSupport = _emoji.Count > 0;
                     s_OsList.Clear();
                     if (_includeOsFallbacks)
                         s_OsList.AddRange(s_OsFallbacks);

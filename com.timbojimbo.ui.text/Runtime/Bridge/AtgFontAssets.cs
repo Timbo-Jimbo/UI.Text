@@ -73,7 +73,10 @@ namespace TimboJimbo.UI.Text.Bridge
 
         /// <summary>
         /// A dynamic font asset for a font file imported into the project (TTF/OTF as a <see cref="Font"/>).
-        /// Colour fonts get a colour atlas, everything else an SDF atlas.
+        /// Colour fonts get a colour atlas, everything else an SDF atlas. The engine gives a colour font asset a
+        /// material on the "Hidden/TextCore/Sprite" shader and returns null when it cannot find that shader, which in
+        /// a player it can only if the build has it: the package's Resources hold a material on it ("Colour Font
+        /// Shader") for that reason alone. Texts draw with the package's own shaders either way.
         /// </summary>
         public static FontAsset CreateFromFont(Font font, int samplingPointSize = DefaultSamplingPointSize, int atlasPadding = DefaultAtlasPadding, int atlasSize = AtlasSize)
         {
