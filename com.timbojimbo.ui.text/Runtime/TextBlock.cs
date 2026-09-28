@@ -59,6 +59,12 @@ namespace TimboJimbo.UI.Text
         private bool _measuresDirty = true;
         private bool _longestWordDirty = true;
         private float _longestWord;
+        // What a LayoutNode's layout last asked it to measure, kept until the text or how it is drawn changes, as the
+        // measures above are: the layout asks every frame, so it is measured once, not every frame.
+        private bool _layoutMeasuresDirty = true;
+        private Vector2 _layoutUnwrapped;
+        private float _layoutWrapWidth = float.NaN;
+        private Vector2 _layoutWrapped;
         private float _measuredForWidth = float.NaN;
         private float _preferredWidth;
         private float _preferredHeight;
@@ -309,12 +315,39 @@ namespace TimboJimbo.UI.Text
 #if TJ_TEXT_LAYOUT
         // ---- ILayoutMeasurable (UI Layout package) ----
 
-        /// <summary>The content of a LayoutNode: the text's size at the width the layout offers, as a pure measure.</summary>
+        /// <summary>
+        /// The content of a LayoutNode: the text's size at the width the layout offers, as a pure measure. Kept until
+        /// the text or how it is drawn changes: unwrapped, and wrapped to the last width asked for. A width it fits in
+        /// unwrapped needs no measure of its own: it lays out the same.
+        /// </summary>
         Vector2 TimboJimbo.UI.Layout.ILayoutMeasurable.Measure(float availableWidth)
-            => MeasureInUnits(_wordWrap ? availableWidth : -1f);
+        {
+            var unwrapped = LayoutUnwrapped();
+            // A hair under its own width (a fitted node's width less its padding, in floats) still fits it.
+            if (!_wordWrap || availableWidth < 0f || availableWidth >= unwrapped.x - 0.01f)
+                return unwrapped;
+            if (availableWidth != _layoutWrapWidth)
+            {
+                _layoutWrapWidth = availableWidth;
+                _layoutWrapped = MeasureInUnits(availableWidth);
+            }
+            return _layoutWrapped;
+        }
 
         /// <summary>The longest unbreakable run, so a wrapped text is never squeezed narrower than its longest word.</summary>
-        float TimboJimbo.UI.Layout.ILayoutMeasurable.MinWidth => _wordWrap ? LongestWordWidth() : MeasureInUnits(-1f).x;
+        float TimboJimbo.UI.Layout.ILayoutMeasurable.MinWidth => _wordWrap ? LongestWordWidth() : LayoutUnwrapped().x;
+
+        // The text's unwrapped size, measured again only once it has changed (which drops the wrapped one too).
+        private Vector2 LayoutUnwrapped()
+        {
+            if (_layoutMeasuresDirty)
+            {
+                _layoutMeasuresDirty = false;
+                _layoutUnwrapped = MeasureInUnits(-1f);
+                _layoutWrapWidth = float.NaN;
+            }
+            return _layoutUnwrapped;
+        }
 #endif
 
         // ---- Lifecycle ----
@@ -367,6 +400,7 @@ namespace TimboJimbo.UI.Text
             _maxLines = Mathf.Max(0, _maxLines);
             _measuresDirty = true;
             _longestWordDirty = true;
+            _layoutMeasuresDirty = true;
             base.OnValidate();
         }
 
@@ -381,6 +415,7 @@ namespace TimboJimbo.UI.Text
         {
             _measuresDirty = true;
             _longestWordDirty = true;
+            _layoutMeasuresDirty = true;
             SetVerticesDirty();
             SetLayoutDirty();
         }
@@ -389,6 +424,7 @@ namespace TimboJimbo.UI.Text
         {
             _measuresDirty = true;
             _longestWordDirty = true;
+            _layoutMeasuresDirty = true;
             base.SetVerticesDirty();
         }
 
