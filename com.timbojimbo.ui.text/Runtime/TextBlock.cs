@@ -65,6 +65,10 @@ namespace TimboJimbo.UI.Text
         private Vector2 _layoutUnwrapped;
         private float _layoutWrapWidth = float.NaN;
         private Vector2 _layoutWrapped;
+
+        // The size a LayoutNode on it is given, which its rect may still be springing towards; negative when nothing
+        // sizes it so (it is laid out at its rect). Never saved: layout tells it again once it is laid out.
+        private Vector2 _arranged = new(-1f, -1f);
         private float _measuredForWidth = float.NaN;
         private float _preferredWidth;
         private float _preferredHeight;
@@ -132,7 +136,7 @@ namespace TimboJimbo.UI.Text
         public TextAnchor Alignment
         {
             get => _alignment;
-            set { if (_alignment != value) { _alignment = value; SetVerticesDirty(); } }
+            set { if (_alignment != value) { _alignment = value; PlaceChildren(); SetVerticesDirty(); } }
         }
 
         public bool WordWrap
@@ -337,6 +341,22 @@ namespace TimboJimbo.UI.Text
         /// <summary>The longest unbreakable run, so a wrapped text is never squeezed narrower than its longest word.</summary>
         float TimboJimbo.UI.Layout.ILayoutMeasurable.MinWidth => _wordWrap ? LongestWordWidth() : LayoutUnwrapped().x;
 
+        /// <summary>
+        /// The size its LayoutNode is given: while the node's rect springs there, the text is laid out at it (wrapped
+        /// to its width, so it has the lines it will end with from the start), held at its alignment's side of the rect,
+        /// as a node's children are laid out at its new size. Negative: laid out at its rect again.
+        /// </summary>
+        void TimboJimbo.UI.Layout.ILayoutMeasurable.Arrange(Vector2 size)
+        {
+            if (size.x < 0f || size.y < 0f)
+                size = new Vector2(-1f, -1f);
+            if (size == _arranged)
+                return;
+            _arranged = size;
+            PlaceChildren();
+            SetVerticesDirty();
+        }
+
         // The text's unwrapped size, measured again only once it has changed (which drops the wrapped one too).
         private Vector2 LayoutUnwrapped()
         {
@@ -462,21 +482,51 @@ namespace TimboJimbo.UI.Text
                 if (childName == GlyphsName)
                     go.AddComponent<CanvasRenderer>();
             }
-            child.anchorMin = Vector2.zero;
-            child.anchorMax = Vector2.one;
-            child.pivot = new Vector2(0f, 1f);
-            child.offsetMin = Vector2.zero;
-            child.offsetMax = Vector2.zero;
+            PlaceChild(child);
             child.localScale = Vector3.one;
             child.SetSiblingIndex(siblingIndex);
             return child;
+        }
+
+        // Places the children the text is drawn on, once they are there.
+        private void PlaceChildren()
+        {
+            if (_decorations != null) PlaceChild(_decorations);
+            if (_glyphs != null) PlaceChild(_glyphs.rectTransform);
+            if (_objects != null) PlaceChild(_objects);
+        }
+
+        // A child the text is drawn on covers its rect, pivoted at the top-left corner, where the geometry starts. While
+        // a layout size is arranged, it is that size instead, held at the side of the rect the text is aligned to (a
+        // left-aligned text at the left, a centred one at the centre), which is where it lines up once the rect gets there.
+        private void PlaceChild(RectTransform child)
+        {
+            child.pivot = new Vector2(0f, 1f);
+            if (_arranged.x < 0f)
+            {
+                child.anchorMin = Vector2.zero;
+                child.anchorMax = Vector2.one;
+                child.offsetMin = Vector2.zero;
+                child.offsetMax = Vector2.zero;
+                return;
+            }
+            int a = (int)_alignment;
+            // TextAnchor runs upper-left to lower-right, a row of three at a time.
+            float x = (a % 3) * 0.5f, down = (a / 3) * 0.5f;
+            var anchor = new Vector2(x, 1f - down);
+            child.anchorMin = anchor;
+            child.anchorMax = anchor;
+            child.sizeDelta = _arranged;
+            // The pivot (its top-left corner) is that far left of the anchor and that far above it.
+            child.anchoredPosition = new Vector2(-x * _arranged.x, down * _arranged.y);
         }
 
         // ---- Queries ----
 
         /// <summary>
         /// Rectangles covering the source characters in [start, end), one per line, in this component's local
-        /// space (canvas units, y up). Empty until the text has been laid out.
+        /// space (canvas units, y up), whatever its pivot and wherever a layout has arranged the text inside its rect.
+        /// Empty until the text has been laid out.
         /// </summary>
         public void GetCharacterRects(int start, int end, List<Rect> results)
         {
@@ -484,11 +534,16 @@ namespace TimboJimbo.UI.Text
             if (_glyphs == null)
                 return;
             _layout.GetSourceRangeRects(start, end, s_Rects);
+            // The text is laid out on the glyph child, from its rect's top-left corner (see BuildGeometry). That child is
+            // this component's own, never turned or scaled, so its space is this one moved by where its pivot sits in it:
+            // its local position, wherever PlaceChild put it (over this rect, or at an arranged size inside it).
             var rect = _glyphs.GetPixelAdjustedRect();
+            Vector2 origin = _glyphs.rectTransform.localPosition;
+            float left = origin.x + rect.xMin, top = origin.y + rect.yMax;
             for (int i = 0; i < s_Rects.Count; i++)
             {
                 var r = s_Rects[i];
-                results.Add(new Rect(rect.xMin + r.xMin, rect.yMax - r.yMax, r.width, r.height));
+                results.Add(new Rect(left + r.xMin, top - r.yMax, r.width, r.height));
             }
         }
 
@@ -551,8 +606,9 @@ namespace TimboJimbo.UI.Text
         {
             // The layout gets the rect as sized, not the pixel-adjusted one: on a pixel-perfect canvas the
             // adjustment can take up to a pixel off the width a text was measured to fit exactly, and the
-            // last word would wrap. The geometry is placed on the adjusted rect.
-            var rect = rectTransform.rect;
+            // last word would wrap. The geometry is placed on the adjusted rect. It is the glyph child's rect: its
+            // own, or the size layout arranged it at (see PlaceChild).
+            var rect = _glyphs.rectTransform.rect;
             var input = TextLayoutInput.Default;
             input.Text = _text;
             input.RichText = _richText;
