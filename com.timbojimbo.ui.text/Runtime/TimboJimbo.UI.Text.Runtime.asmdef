@@ -4,8 +4,7 @@
     "references": [
         "UnityEngine.TextCore.Tools",
         "UnityEngine.UI",
-        "TimboJimbo.UI.Runtime",
-        "TimboJimbo.UI.Layout.Runtime"
+        "TimboJimbo.UI.Runtime"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
@@ -16,8 +15,8 @@
     "defineConstraints": [],
     "versionDefines": [
         {
-            "name": "com.timbojimbo.ui.layout",
-            "expression": "0.4.0",
+            "name": "com.timbojimbo.ui",
+            "expression": "0.3.0",
             "define": "TJ_TEXT_LAYOUT"
         },
         {

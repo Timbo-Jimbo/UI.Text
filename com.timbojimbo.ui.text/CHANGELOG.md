@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+### Changed
+
+- `TextBlock`'s layout support (`TJ_TEXT_LAYOUT`) comes with the UI package from 0.3.0, which now holds UI Layout, rather than with the UI Layout package; the UI package dependency is 0.3.0
+
 ## [0.2.0] - 01/10/2026
 
 ### Added
