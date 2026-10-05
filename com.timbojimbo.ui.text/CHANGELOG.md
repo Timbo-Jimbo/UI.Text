@@ -3,6 +3,7 @@
 ### Changed
 
 - `TextBlock`'s layout support (`TJ_TEXT_LAYOUT`) comes with the UI package from 0.3.0, which now holds UI Layout, rather than with the UI Layout package; the UI package dependency is 0.3.0
+- The built-in code background (`BoxCodeSpanHandler`) draws its border with its Box's Border layer (the UI package's Box layers) rather than a second, concentric Box on a child object
 
 ## [0.2.0] - 01/10/2026
 

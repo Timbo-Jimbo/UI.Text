@@ -44,29 +44,13 @@ namespace TimboJimbo.UI.Text
                 var background = go.AddComponent<BoxInlineBackground>();
                 var box = go.AddComponent<Box>();
                 box.raycastTarget = false;
-                box.color = _color;
-                box.StrokeWidth = 0f;
+                box.Fill = new BoxLayer(_color);
+                // The border ring over the fill.
+                if (_strokeWidth > 0f)
+                    box.Border = new BoxLayer(_strokeColor) { Stroke = _strokeWidth };
                 background.Box = box;
                 background.VerticalPaddingEm = _paddingEm.y;
                 background.CornerRadiusEm = _cornerRadiusEm;
-
-                if (_strokeWidth > 0f)
-                {
-                    // A second Box on a stretched child draws the border ring over the fill.
-                    var strokeGo = new GameObject("Stroke", typeof(RectTransform), typeof(CanvasRenderer));
-                    strokeGo.hideFlags = HideFlags.HideAndDontSave;
-                    strokeGo.transform.SetParent(go.transform, false);
-                    var strokeRect = (RectTransform)strokeGo.transform;
-                    strokeRect.anchorMin = Vector2.zero;
-                    strokeRect.anchorMax = Vector2.one;
-                    strokeRect.offsetMin = Vector2.zero;
-                    strokeRect.offsetMax = Vector2.zero;
-                    var stroke = strokeGo.AddComponent<Box>();
-                    stroke.raycastTarget = false;
-                    stroke.color = _strokeColor;
-                    stroke.StrokeWidth = _strokeWidth;
-                    stroke.Concentric = true;
-                }
 
                 _template = go;
                 return _template;
