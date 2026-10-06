@@ -38,6 +38,8 @@ namespace TimboJimbo.UI.Text
         [SerializeField] private bool _bold;
         [SerializeField] private bool _italic;
         [SerializeField] private TextAnchor _alignment = TextAnchor.UpperLeft;
+        [Tooltip("Left and right alignment mean the start and end of the text: a text that reads right to left (see Direction) aligned left sits at the right, as UIKit's natural alignment and CSS's text-align: start do.")]
+        [SerializeField] private bool _naturalAlignment;
         [SerializeField] private bool _wordWrap = true;
         [Tooltip("Let a wrapped text break inside a word when a line is too narrow for it (CSS overflow-wrap: anywhere): its minimum width in layout is 0, so a growing or fitted node holding long unbroken words can shrink and wrap.")]
         [SerializeField] private bool _breakWordsAnywhere;
@@ -148,6 +150,18 @@ namespace TimboJimbo.UI.Text
             set { if (_alignment != value) { _alignment = value; PlaceChildren(); SetVerticesDirty(); } }
         }
 
+        /// <summary>
+        /// Whether <see cref="Alignment"/>'s left and right mean the start and end of the text, as UIKit's natural
+        /// alignment and CSS's text-align: start and end do: a text that reads right to left (its <see cref="Direction"/>,
+        /// or for <see cref="TextBlockDirection.Auto"/> its first letter) aligned left sits at the right. Off by default:
+        /// left is left.
+        /// </summary>
+        public bool NaturalAlignment
+        {
+            get => _naturalAlignment;
+            set { if (_naturalAlignment != value) { _naturalAlignment = value; PlaceChildren(); SetVerticesDirty(); } }
+        }
+
         public bool WordWrap
         {
             get => _wordWrap;
@@ -180,11 +194,22 @@ namespace TimboJimbo.UI.Text
             set { value = Mathf.Max(0, value); if (_maxLines != value) { _maxLines = value; MarkTextChanged(); } }
         }
 
+        /// <summary>
+        /// The direction its paragraphs read in: left to right, right to left, or, for <see cref="TextBlockDirection.Auto"/>,
+        /// that of the text's first letter, for text people write.
+        /// </summary>
         public TextBlockDirection Direction
         {
             get => _direction;
             set { if (_direction != value) { _direction = value; SetVerticesDirty(); } }
         }
+
+        /// <summary>
+        /// Whether the text was last laid out reading right to left: its <see cref="Direction"/>, or for
+        /// <see cref="TextBlockDirection.Auto"/>, that of its first letter. Call <see cref="EnsureLayout"/> first when the
+        /// text may have changed this frame.
+        /// </summary>
+        public bool IsRightToLeft => _layout.IsRightToLeft;
 
         public float CharacterSpacing
         {
@@ -518,6 +543,13 @@ namespace TimboJimbo.UI.Text
             return child;
         }
 
+        // The side of the rect the text is held at while a layout size is arranged: its alignment, turned across for
+        // natural alignment when it last read right to left.
+        private TextAnchor PlacedAlignment => _naturalAlignment && _layout.IsRightToLeft ? TextLayout.Across(_alignment) : _alignment;
+
+        // The side the children were last held at while arranged, to hold them again when it changes.
+        private TextAnchor _placedAlignment;
+
         // Places the children the text is drawn on, once they are there.
         private void PlaceChildren()
         {
@@ -528,7 +560,8 @@ namespace TimboJimbo.UI.Text
 
         // A child the text is drawn on covers its rect, pivoted at the top-left corner, where the geometry starts. While
         // a layout size is arranged, it is that size instead, held at the side of the rect the text is aligned to (a
-        // left-aligned text at the left, a centred one at the centre), which is where it lines up once the rect gets there.
+        // left-aligned text at the left, a centred one at the centre, and with natural alignment, a right-to-left text
+        // aligned left at the right), which is where it lines up once the rect gets there.
         private void PlaceChild(RectTransform child)
         {
             child.pivot = new Vector2(0f, 1f);
@@ -540,7 +573,8 @@ namespace TimboJimbo.UI.Text
                 child.offsetMax = Vector2.zero;
                 return;
             }
-            int a = (int)_alignment;
+            _placedAlignment = PlacedAlignment;
+            int a = (int)_placedAlignment;
             // TextAnchor runs upper-left to lower-right, a row of three at a time.
             float x = (a % 3) * 0.5f, down = (a / 3) * 0.5f;
             var anchor = new Vector2(x, 1f - down);
@@ -624,8 +658,60 @@ namespace TimboJimbo.UI.Text
         public int GetLineEnd(int line) => _layout.GetLineEnd(line);
 
         /// <summary>
-        /// Rectangles covering the source characters in [start, end), one per line; a text with nothing to draw (only
-        /// spaces or line breaks) answers too. Empty until the text has been laid out.
+        /// Whether the character at a source index reads right to left: a letter by its script, a number never, and a
+        /// space or punctuation as the text around it is laid out (the paragraph's way at a line's end).
+        /// </summary>
+        public bool IsCharacterRightToLeft(int index) => _layout.IsCharacterRightToLeft(index);
+
+        /// <summary>
+        /// A caret-shaped rect (zero wide, as tall as the line) at the leading edge of the character at a source index,
+        /// or for <paramref name="leading"/> false its trailing edge, in that character's own direction: where a
+        /// selection's start and end handles stand, beside the first and last characters selected, however the text
+        /// around them reads (as Android places its handles and iOS its selection rects). The text's end, or a line
+        /// break, at the end of its line.
+        /// </summary>
+        public Rect GetCharacterEdgeRect(int index, bool leading)
+        {
+            var r = _layout.GetCharacterEdgeRect(index, leading);
+            var origin = LayoutOrigin();
+            return new Rect(origin.x + r.xMin, origin.y - r.yMax, 0f, r.height);
+        }
+
+        /// <summary>
+        /// The source index whose character edge (see <see cref="GetCharacterEdgeRect"/>) is nearest a point in local
+        /// space, on the line the point is level with: for <paramref name="leading"/>, of a character whose leading edge
+        /// is nearest, where a selection's start handle is dragged to; otherwise the index after a character whose
+        /// trailing edge is nearest, where its end handle is dragged to, taken <paramref name="upstream"/> at the end of a
+        /// wrapped line.
+        /// </summary>
+        public int GetIndexAtEdge(Vector2 localPoint, bool leading, out bool upstream)
+        {
+            var origin = LayoutOrigin();
+            return _layout.GetIndexAtEdge(new Vector2(localPoint.x - origin.x, origin.y - localPoint.y), leading, out upstream);
+        }
+
+        /// <summary>
+        /// The caret position beside the caret at a source index on screen, to its right or its left, as the arrow keys
+        /// move a caret in iOS, macOS and Android text views: across the line by where its carets stand, which in text
+        /// that reads both ways is not the order of the indices. Past a line's end, as the text reads, it goes on to the
+        /// next line's start, and past its start to the end of the line before (<paramref name="besideUpstream"/> where
+        /// that line wraps). At the text's first or last place, the same index.
+        /// </summary>
+        public int GetVisualNeighbour(int index, bool upstream, bool toRight, out bool besideUpstream) =>
+            _layout.GetVisualNeighbour(index, upstream, toRight, out besideUpstream);
+
+        /// <summary>
+        /// Whether a plain text (no markup) in a direction reads right to left, as <see cref="IsRightToLeft"/> says once
+        /// a TextBlock with Rich Text off has laid it out: for <see cref="TextBlockDirection.Auto"/> and
+        /// <see cref="TextBlockDirection.AutoRightToLeft"/>, by its first strong character.
+        /// </summary>
+        public static bool ReadsRightToLeft(string text, TextBlockDirection direction) => TextLayout.ReadsRightToLeft(text, direction);
+
+        /// <summary>
+        /// Rectangles covering the source characters in [start, end): one per stretch of a line they cover (a line whose
+        /// text reads both ways has one per stretch that reads one way), a line's trailing spaces and line break covered
+        /// after its text, where its carets stand. A text with nothing to draw (only spaces or line breaks) answers too.
+        /// Empty until the text has been laid out.
         /// </summary>
         public void GetCharacterRects(int start, int end, List<Rect> results)
         {
@@ -735,6 +821,7 @@ namespace TimboJimbo.UI.Text
             input.AntiAliasMarginPx = 1f / scale;
             input.WordWrap = _wordWrap;
             input.Alignment = _alignment;
+            input.NaturalAlignment = _naturalAlignment;
             input.Overflow = _overflow;
             input.MaxLines = _maxLines;
             input.Direction = _direction;
@@ -748,6 +835,11 @@ namespace TimboJimbo.UI.Text
             input.IcuData = _icuData;
             var context = new InlineContext(this, _fontSize, color);
             _layout.Generate(in input, in context);
+            // Natural alignment holds a text that now reads the other way (or whose alignment changed in the inspector)
+            // at the other side. Only where the children are, not their size, which leaves their rects (and the geometry
+            // built on them) as they are.
+            if (_arranged.x >= 0f && PlacedAlignment != _placedAlignment)
+                PlaceChildren();
         }
     }
 

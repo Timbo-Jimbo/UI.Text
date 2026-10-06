@@ -196,7 +196,11 @@ namespace TimboJimbo.UI.Text.Bridge
         /// <summary>The link id under a point in layout pixels, or -1.</summary>
         public int LinkAt(Vector2 pointPx) => _laidOut ? TextLib.FindIntersectingLink(pointPx, _info) : -1;
 
-        /// <summary>Rectangles covering the characters in [start, end), one per line, in layout pixels.</summary>
+        /// <summary>
+        /// Rectangles covering the characters in [start, end), in layout pixels: one per line, or in a line whose text
+        /// reads both ways, one per run of each direction. As the engine places them: in right-to-left text it puts a line
+        /// break's box at the line's start and a wrapped line's trailing space before the start of the box.
+        /// </summary>
         public void GetRangeRects(int start, int end, List<Rect> results)
         {
             results.Clear();

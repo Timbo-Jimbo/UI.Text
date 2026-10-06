@@ -1,3 +1,25 @@
+## [Unreleased]
+
+### Added
+
+- `TextBlockDirection.Auto`: the text reads the way its first strong character does (a letter or a directional mark, by Unicode's bidi classes, passing over directional isolates), as HTML's `dir="auto"` decides it, over the whole text; left to right with none. For text people write: Arabic and Hebrew read right to left, with their punctuation at the right end. `TextBlockDirection.AutoRightToLeft` is the same but right to left with no letter, for a field whose keyboard writes right to left (Android's FIRSTSTRONG_RTL)
+- `TextBlock.NaturalAlignment`: Alignment's left and right are the text's start and end, as UIKit's natural alignment and CSS's `text-align: start` are, so a right-to-left text aligned left sits at the right, and stays there while a layout springs its rect. Off by default
+- `TextBlock.IsRightToLeft` (the direction the text was laid out in) and `TextBlock.ReadsRightToLeft(text, direction)` (which way a plain text would be laid out, without laying it out)
+- Queries for editing text that reads both ways: `IsCharacterRightToLeft` (a letter by its script, a number never, a space or punctuation as it was laid out), `GetCharacterEdgeRect` and `GetIndexAtEdge` (a character's leading and trailing edges in its own direction, where a selection's handles stand, as Android and iOS place them) and `GetVisualNeighbour` (the caret position beside a caret on screen, where an arrow key takes it in iOS, macOS and Android text views, going on to the next or previous line in reading order)
+
+### Changed
+
+- Carets follow Core Text's primary caret model at a line's ends too, as they already did inside a line: a line's start and end are the sides the paragraph starts from and ends at, past the spaces at its end, which stand at the paragraph's level (UAX #9, L1). Left-to-right text gets the same carets as before
+- `GetIndexAt` matches a point to the caret nearest it on the line it is level with, of the places before a character drawn with a box of its own (not inside a ligature, an emoji sequence, or between a letter and its marks). A point past a wrapped line's end now takes the place after its trailing space, upstream, as the API always described, rather than the one before it
+- `GetCharacterRects` covers a line's trailing spaces and line break after its text, where its carets stand, and joins rects that touch, so a range gives one rect per stretch of a line rather than one per engine run
+
+### Fixed
+
+- In right-to-left text over several lines the engine's own caret answers were taken: the text's start was drawn on its last line and its end on its first, the caret before a line break stood at the line's start when the line ended in a left-to-right word, a wrapped line's trailing space stood before the start of its box, and a point past a line's ends was matched to positions on other lines (often the text's end)
+- A point past the end of a text ending in spaces found the place before the last space, not the text's end
+- A point past the end of a line ending in a line break, in rich text, found the start of the next line in the source, not the end of its own
+- The caret on the empty line after a final line break took the height of the line above it, so after a tall line (a heading) it was too tall and too high
+
 ## [0.3.0] - 06/10/2026
 
 ### Added

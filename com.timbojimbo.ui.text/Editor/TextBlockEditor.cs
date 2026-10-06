@@ -11,7 +11,7 @@ namespace TimboJimboEditor.UI.Text
     {
         private SerializedProperty _text, _richText, _theme;
         private SerializedProperty _font, _fontSize, _bold, _italic, _underline, _strikethrough;
-        private SerializedProperty _alignment, _wordWrap, _breakWordsAnywhere, _overflow, _maxLines, _direction, _characterSpacing, _wordSpacing, _paragraphSpacing;
+        private SerializedProperty _alignment, _naturalAlignment, _wordWrap, _breakWordsAnywhere, _overflow, _maxLines, _direction, _characterSpacing, _wordSpacing, _paragraphSpacing;
         private SerializedProperty _onLinkClicked;
 
         private static bool s_ShowLayout = true;
@@ -30,6 +30,7 @@ namespace TimboJimboEditor.UI.Text
             _underline = serializedObject.FindProperty("_underline");
             _strikethrough = serializedObject.FindProperty("_strikethrough");
             _alignment = serializedObject.FindProperty("_alignment");
+            _naturalAlignment = serializedObject.FindProperty("_naturalAlignment");
             _wordWrap = serializedObject.FindProperty("_wordWrap");
             _breakWordsAnywhere = serializedObject.FindProperty("_breakWordsAnywhere");
             _overflow = serializedObject.FindProperty("_overflow");
@@ -69,6 +70,7 @@ namespace TimboJimboEditor.UI.Text
             {
                 EditorGUI.indentLevel++;
                 EditorGUILayout.PropertyField(_alignment);
+                EditorGUILayout.PropertyField(_naturalAlignment);
                 EditorGUILayout.PropertyField(_wordWrap);
                 if (_wordWrap.boolValue || _wordWrap.hasMultipleDifferentValues)
                 {
