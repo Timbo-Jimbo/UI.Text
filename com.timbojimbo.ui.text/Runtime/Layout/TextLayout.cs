@@ -24,7 +24,7 @@ namespace TimboJimbo.UI.Text
         RightToLeft,
     }
 
-    /// <summary>Everything a layout needs. Lengths are layout pixels: canvas units times the canvas scale factor.</summary>
+    /// <summary>Everything a layout needs. Lengths are layout pixels: the unit the text is laid out in, canvas units for a TextBlock.</summary>
     public struct TextLayoutInput
     {
         public string Text;
@@ -113,6 +113,9 @@ namespace TimboJimbo.UI.Text
         private FontAsset _baseFont;
         private float _fontSizePx;
         private float _widthPx;
+        private float _heightPx;
+        private TextAnchor _alignment;
+        private float _paragraphSpacingPx;
         private bool _generated;
 
         private static readonly List<TextLayout> s_MeasureScopes = new();
@@ -155,7 +158,11 @@ namespace TimboJimbo.UI.Text
             var theme = input.Theme != null ? input.Theme : TextTheme.Default;
             var settings = Settings(in input, theme, in context, _decorationRuns, _atomicRequests);
             if (string.IsNullOrEmpty(settings.Text))
+            {
+                // Nothing to lay out: the handle lets go of the last text, so neither its size nor its queries answer for it.
+                _handle.Clear();
                 return false;
+            }
 
             if (input.Underline || input.Strikethrough)
             {
@@ -194,6 +201,9 @@ namespace TimboJimbo.UI.Text
             _baseFont = settings.Font != null ? settings.Font : AtgFallbackSet.DefaultFont;
             _fontSizePx = input.FontSizePx;
             _widthPx = input.WidthPx;
+            _heightPx = input.HeightPx;
+            _alignment = input.Alignment;
+            _paragraphSpacingPx = input.ParagraphSpacingPx;
 
             settings.FontSizePx = input.FontSizePx;
             settings.WidthPx = input.WidthPx;
@@ -395,11 +405,14 @@ namespace TimboJimbo.UI.Text
             }
         }
 
-        /// <summary>Rectangles covering the source characters in [start, end), one per line, in layout pixels.</summary>
+        /// <summary>
+        /// Rectangles covering the source characters in [start, end), one per line, in layout pixels. A text with
+        /// nothing to draw (only spaces or line breaks) is laid out all the same and answers too.
+        /// </summary>
         public void GetSourceRangeRects(int sourceStart, int sourceEnd, List<Rect> results)
         {
             results.Clear();
-            if (!_generated)
+            if (!_handle.IsLaidOut)
                 return;
             _handle.GetRangeRects(_layoutText.ToLayout(sourceStart), _layoutText.ToLayout(sourceEnd), results);
         }
@@ -407,11 +420,217 @@ namespace TimboJimbo.UI.Text
         /// <summary>The index into <see cref="TextDocument.Links"/> of the link under a layout point, or -1.</summary>
         public int LinkAt(Vector2 pointPx)
         {
-            if (!_generated)
+            if (!_handle.IsLaidOut)
                 return -1;
             int link = _handle.LinkAt(pointPx);
             return link >= 0 && link < _document.Links.Count ? link : -1;
         }
+
+        // ---- Carets and lines ----
+        // Source indices and layout pixels (y down from the layout's top-left corner), for the last layout. Plain text
+        // maps 1:1; with rich text a source index inside hidden markup is taken at the next shown character, as the
+        // range rectangles take it. A text with nothing to draw (spaces, line breaks) is laid out all the same and
+        // answers; an empty text answers from its font, as a single empty line placed where its alignment puts a line.
+        // An index where a line wraps is on two lines at once: it ends the line before and starts the line after. Taken
+        // upstream it is the end of the line before, otherwise the start of the line after, as a caret's affinity
+        // decides in UIKit (UITextStorageDirection) and Flutter (TextAffinity); the caller keeps the affinity with its
+        // caret, upstream after End or a tap past a wrapped line's end.
+
+        /// <summary>
+        /// The caret at a source index, in layout pixels: zero wide, at the insertion point, as tall as the line the
+        /// index is on. An index where a line wraps is drawn at the end of the line before when
+        /// <paramref name="upstream"/>, otherwise at the start of the line after. In an empty text it sits at the side of
+        /// the box the text is aligned to, as tall as the font's line height.
+        /// </summary>
+        public Rect GetCaretRect(int sourceIndex, bool upstream = false)
+        {
+            if (!_handle.IsLaidOut)
+                return EmptyTextCaret();
+            int index = LayoutIndex(sourceIndex);
+            if (index == _layoutText.Length && EndsWithBreak())
+                return TrailingLineCaret(_handle.CaretRectPx(index - 1));
+            if (upstream && WrapsAt(index))
+                return WrappedLineEndCaret(index);
+            return _handle.CaretRectPx(index);
+        }
+
+        /// <summary>
+        /// The source index of the caret position nearest a point in layout pixels. A point above the first line or
+        /// below the last finds the nearest position on that line; past either end of a line, that end.
+        /// </summary>
+        public int GetIndexAt(Vector2 pointPx) => GetIndexAt(pointPx, out _);
+
+        /// <summary>
+        /// The source index of the caret position nearest a point in layout pixels, as <see cref="GetIndexAt(Vector2)"/>,
+        /// and whether to take it upstream: true when the point is on a wrapped line past its end, whose nearest position
+        /// is the index the next line starts at.
+        /// </summary>
+        public int GetIndexAt(Vector2 pointPx, out bool upstream)
+        {
+            upstream = false;
+            if (!_handle.IsLaidOut)
+                return 0;
+            int length = _layoutText.Length;
+            bool trailingLine = EndsWithBreak();
+            // The last line with characters on it ends at the text's end, or before a final line break.
+            var lastCaret = _handle.CaretRectPx(trailingLine ? length - 1 : length);
+            if (trailingLine && pointPx.y >= TrailingLineCaret(lastCaret).yMin)
+                return _layoutText.ToSource(length);
+            // Held within the lines, so a point above or below them is matched against the nearest one.
+            pointPx.y = Mathf.Clamp(pointPx.y, _handle.CaretRectPx(0).yMin, lastCaret.yMax);
+            int index = _handle.IndexAt(pointPx);
+            if (!WrapsAt(index))
+                return _layoutText.ToSource(index);
+            // A wrap's index is on both lines; the point is on the one its height is nearer, split midway between them.
+            upstream = pointPx.y < (WrappedLineEndCaret(index).yMax + _handle.CaretRectPx(index).yMin) * 0.5f;
+            return upstream ? _layoutText.ToSourceEnd(index) : _layoutText.ToSource(index);
+        }
+
+        /// <summary>How many lines the text has: at least 1, and a text ending in a line break ends with an empty line.</summary>
+        public int LineCount
+        {
+            get
+            {
+                if (!_handle.IsLaidOut)
+                    return 1;
+                int last = _handle.LineOf(CodePointStart(_layoutText.Length - 1));
+                return EndsWithBreak() ? last + 2 : last + 1;
+            }
+        }
+
+        /// <summary>
+        /// The line a source index is on, counted from 0. An index where a line wraps is on the line before when
+        /// <paramref name="upstream"/>, otherwise on the line after.
+        /// </summary>
+        public int GetLineAt(int sourceIndex, bool upstream = false)
+        {
+            if (!_handle.IsLaidOut)
+                return 0;
+            int length = _layoutText.Length;
+            int index = LayoutIndex(sourceIndex);
+            if (index < length)
+                return _handle.LineOf(upstream && WrapsAt(index) ? CodePointStart(index - 1) : index);
+            // The text's end: on the empty line after a final line break, otherwise on the last character's line.
+            int last = _handle.LineOf(CodePointStart(length - 1));
+            return EndsWithBreak() ? last + 1 : last;
+        }
+
+        /// <summary>The source index of a line's first character. A line past the last starts at the text's end.</summary>
+        public int GetLineStart(int line) => _layoutText.ToSource(LayoutLineStart(line));
+
+        /// <summary>
+        /// The source index at the end of a line's text: before its line break, if it ends in one. A line that wraps
+        /// ends at the index the next one starts at; take it upstream (<see cref="GetCaretRect"/>,
+        /// <see cref="GetLineAt"/>) to keep it on this line.
+        /// </summary>
+        public int GetLineEnd(int line)
+        {
+            int start = LayoutLineStart(line);
+            int end = LayoutLineStart(line + 1);
+            if (end > start && _layoutText.Text[end - 1] == '\n')
+                end--;
+            return _layoutText.ToSourceEnd(end);
+        }
+
+        /// <summary>
+        /// The line height (the distance between baselines) of a font stack's primary font at a size, in layout pixels:
+        /// the font a text with that stack is laid out in. 0 when there is no font to lay out in.
+        /// </summary>
+        public static float LineHeightOf(FontStack font, float fontSizePx)
+        {
+            var primary = EffectiveStack(font).Primary;
+            if (primary == null)
+                primary = AtgFallbackSet.DefaultFont;
+            return primary != null ? AtgFontAssets.LineHeightPx(primary, fontSizePx) : 0f;
+        }
+
+        // A source index as a layout index the engine takes: within the text and at a code point boundary.
+        private int LayoutIndex(int sourceIndex) => CodePointStart(Mathf.Clamp(_layoutText.ToLayout(sourceIndex), 0, _layoutText.Length));
+
+        // A layout index between the halves of a surrogate pair moved back to the pair's start: the engine works in code
+        // points and takes indices at their boundaries (see AtgTextHandle's queries).
+        private int CodePointStart(int index)
+        {
+            var text = _layoutText.Text;
+            return index > 0 && index < text.Length && char.IsLowSurrogate(text[index]) && char.IsHighSurrogate(text[index - 1]) ? index - 1 : index;
+        }
+
+        private bool EndsWithBreak()
+        {
+            var text = _layoutText.Text;
+            return text.Length > 0 && text[text.Length - 1] == '\n';
+        }
+
+        // Whether a line wraps at a layout index: a line starts there that no line break began, so the index also ends
+        // the line before it.
+        private bool WrapsAt(int index)
+        {
+            var text = _layoutText.Text;
+            if (index <= 0 || index >= text.Length || text[index - 1] == '\n')
+                return false;
+            return _handle.LineOf(index) != _handle.LineOf(CodePointStart(index - 1));
+        }
+
+        // The caret at the end of the line a wrap at a layout index ends: after the character before the wrap, on that
+        // character's line and as tall as it. The caret before that character is at one side of its box, so the caret
+        // after it is at the other, whichever way the text runs; a character the engine gives no box keeps the caret
+        // before it.
+        private Rect WrappedLineEndCaret(int index)
+        {
+            int previous = CodePointStart(index - 1);
+            var caret = _handle.CaretRectPx(previous);
+            _handle.GetRangeRects(previous, index, _rects);
+            if (_rects.Count > 0)
+            {
+                var box = _rects[0];
+                caret.x = Mathf.Abs(box.xMax - caret.x) >= Mathf.Abs(box.xMin - caret.x) ? box.xMax : box.xMin;
+            }
+            return caret;
+        }
+
+        // The first layout index on a line; the text's length past the last line with characters on it. Lines are runs
+        // of the text in order, so it is found by bisecting the engine's line numbers. Each probe asks for the line of
+        // the code point it lands in: both halves of a surrogate pair are on one line, so the bisection still finds the
+        // pair's start.
+        private int LayoutLineStart(int line)
+        {
+            if (!_handle.IsLaidOut || line <= 0)
+                return 0;
+            int low = 0, high = _layoutText.Length;
+            while (low < high)
+            {
+                int mid = (low + high) >> 1;
+                if (_handle.LineOf(CodePointStart(mid)) < line)
+                    low = mid + 1;
+                else
+                    high = mid;
+            }
+            return low;
+        }
+
+        // A text ending in a line break ends with an empty line, which holds no character for the engine to place a
+        // caret at. A line break is on the line it ends (as in ICU's line breaking), so that line's caret is the break's
+        // own moved a line further down (a paragraph's spacing included) to the side the text is aligned to.
+        private Rect TrailingLineCaret(Rect breakCaret)
+            => new(AlignedX(), breakCaret.yMin + BaseLineHeightPx + _paragraphSpacingPx, 0f, breakCaret.height);
+
+        // An empty text is one empty line of its font, placed in its box as the alignment places a line.
+        private Rect EmptyTextCaret()
+        {
+            float height = BaseLineHeightPx;
+            float box = _heightPx >= 0f ? _heightPx : height;
+            float top = ((int)_alignment / 3) switch { 0 => 0f, 1 => (box - height) * 0.5f, _ => box - height };
+            return new Rect(AlignedX(), top, 0f, height);
+        }
+
+        // Where a line with nothing on it starts across: the side of the box the text is aligned to.
+        private float AlignedX()
+        {
+            float width = _widthPx >= 0f ? _widthPx : _handle.SizePx.x;
+            return ((int)_alignment % 3) switch { 0 => 0f, 1 => width * 0.5f, _ => width };
+        }
+
+        private float BaseLineHeightPx => _baseFont != null ? AtgFontAssets.LineHeightPx(_baseFont, _fontSizePx) : 0f;
 
         /// <summary>
         /// The size a text would take, in layout pixels, without a component: for virtualised lists that need row

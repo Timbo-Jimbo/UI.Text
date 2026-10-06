@@ -28,6 +28,8 @@ Add **Timbo Jimbo / UI / Text Block** to a `RectTransform` under a Canvas and ty
 
 **Links** raise `OnLinkClicked` with the href. `ITextBlockGlyphModifier` components on the same object can move or recolour glyphs as the mesh is built.
 
+**Carets and lines.** `GetCaretRect`, `GetIndexAt`, `LineCount`, `GetLineAt`, `GetLineStart`, `GetLineEnd` and `LineHeight` say where a caret goes, which position a point is nearest and which line an index is on, in source indices and the TextBlock's local space, as `GetCharacterRects` does for a range: what a text field, a custom caret or a selection is drawn from. They answer for the last layout, which the canvas rebuild makes; `EnsureLayout()` lays the text out at once (cheaply when nothing changed) so they answer for a text set this frame, and the rebuild then draws that layout. An index where a line wraps both ends that line and starts the next: `GetCaretRect` and `GetLineAt` take it at the end of the line when passed `upstream: true`, and `GetIndexAt` says when a point past a wrapped line's end wants that, as a caret's affinity does in UIKit and Flutter. Edit with Rich Text off, where source and layout indices are the same. `BreakWordsAnywhere` lets a wrapped text in a Grow or Fit node shrink below its longest word, as CSS `overflow-wrap: anywhere` does.
+
 ## Samples
 
 **Chat** (Package Manager > Samples): a message feed with a theme, an emote set for `:smile:`, a mention chip for `@name` with a nested TextBlock, a monospace font stack for code and a scene.
@@ -37,4 +39,5 @@ Add **Timbo Jimbo / UI / Text Block** to a `RectTransform` under a Canvas and ty
 - Flags render as letters on Windows because its emoji font has no flag glyphs; supply an emoji font in the stack for consistency.
 - A padded inline span longer than a whole line (a long URL in backticks) has its leading padding wrapped onto a line of its own, which shows as an empty line before it.
 - No outline or shadow effects; a second TextBlock offset behind the first makes a drop shadow.
-- No selection, input field or hover state yet.
+- No selection drawing, input field or hover state of its own: the caret and line queries give a text field what it needs to draw them.
+- `BreakWordsAnywhere` changes the minimum width layout gets, not where lines break, which stays ICU's line breaking: it breaks between CJK characters, but a single word longer than the line may still run past its edge.

@@ -55,7 +55,7 @@ namespace TimboJimbo.UI.Text.Bridge
         public static AtgSpan Range(int start, int length) => new AtgSpan { Start = start, Length = length, LinkId = -1 };
     }
 
-    /// <summary>Everything the generator needs for one layout. Pixel values are in output pixels (canvas units times canvas scale).</summary>
+    /// <summary>Everything the generator needs for one layout. Pixel values are layout pixels, the unit the text is laid out in (canvas units for a TextBlock).</summary>
     public struct AtgTextSettings
     {
         public string Text;

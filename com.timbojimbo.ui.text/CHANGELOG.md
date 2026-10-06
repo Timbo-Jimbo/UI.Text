@@ -1,9 +1,23 @@
-## [Unreleased]
+## [0.3.0] - 06/10/2026
+
+### Added
+
+- Caret and line queries on `TextBlock`, general to any text and what a text field, a custom caret or a selection is built on: `GetCaretRect(index)` (zero wide, at the insertion point, as tall as the line the index is on), `GetIndexAt(localPoint)` (the nearest caret position, held within the text's lines), `LineCount`, `GetLineAt`, `GetLineStart`, `GetLineEnd` and `LineHeight`. Source indices and the component's local space, as `GetCharacterRects` answers, like UIKit's `UITextInput` geometry (`caretRect(for:)`, `closestPosition(to:)`). An index where a line wraps can be taken upstream, at the end of the line it ends (`GetCaretRect(index, upstream)`, `GetLineAt(index, upstream)`, and `GetIndexAt(localPoint, out upstream)` for a point past a wrapped line's end), as a caret's affinity does in UIKit and Flutter. An empty text, a text of nothing but spaces and a text ending in a line break (on its empty last line) all have a caret. `TextLayout` answers the same in layout pixels; the bridge's `AtgTextHandle.CaretRectPx` builds a caret up from the engine's caret bottom by the character's height, as UI Toolkit draws its own
+- `TextBlock.EnsureLayout()`: lays the text out at once when the text, its settings or its rect changed since the last layout, so the queries answer for a text set this frame rather than as of the last canvas rebuild. Cheap when nothing changed, and the rebuild that follows draws that layout instead of making it again
+- `TextBlock.BreakWordsAnywhere` (CSS `overflow-wrap: anywhere`): a wrapped text reports a minimum width of 0 to a `LayoutNode`'s layout rather than its longest word, so a Grow or Fit node holding long unbroken words (a URL, CJK text without spaces) can shrink and wrap instead of widening its row. Off by default
+- `LayoutText.ToSourceEnd`: the source index after the last shown character before a layout index, for positions that end a run of text such as a line's end
+- `AtgTextHandle.IsLaidOut` and `Clear()`
 
 ### Changed
 
-- `TextBlock`'s layout support (`TJ_TEXT_LAYOUT`) comes with the UI package from 0.3.0, which now holds UI Layout, rather than with the UI Layout package; the UI package dependency is 0.3.0
+- `TextBlock`'s layout support (`TJ_TEXT_LAYOUT`) comes with the UI package from 0.3.0, which now holds UI Layout, rather than with the UI Layout package; the UI package dependency is 0.4.0, for its Box layers
 - The built-in code background (`BoxCodeSpanHandler`) draws its border with its Box's Border layer (the UI package's Box layers) rather than a second, concentric Box on a child object
+
+### Fixed
+
+- An empty text left the previous text's layout behind: `TextLayout.SizePx`, `TextLayout.IsElided` (so `TextBlock.IsTruncated`) and the bridge's queries still answered for the text before it
+- The bridge's caret and line queries (`AtgTextHandle.CursorPositionPx`, `IndexAt`, `LineOf`, `LineHeightPx`, `FirstIndexOnLine`, `LastIndexOnLine`, `CharactersThatFit`) handed the engine a null layout before the first one; with nothing laid out, every query now answers as for an empty text
+- A text with nothing to draw (only spaces or line breaks) is still laid out for its queries: `GetCharacterRects` and link hit testing answer for it rather than for nothing
 
 ## [0.2.0] - 01/10/2026
 

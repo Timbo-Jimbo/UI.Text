@@ -39,6 +39,8 @@ namespace TimboJimbo.UI.Text
         [SerializeField] private bool _italic;
         [SerializeField] private TextAnchor _alignment = TextAnchor.UpperLeft;
         [SerializeField] private bool _wordWrap = true;
+        [Tooltip("Let a wrapped text break inside a word when a line is too narrow for it (CSS overflow-wrap: anywhere): its minimum width in layout is 0, so a growing or fitted node holding long unbroken words can shrink and wrap.")]
+        [SerializeField] private bool _breakWordsAnywhere;
         [SerializeField] private TextBlockOverflow _overflow = TextBlockOverflow.Overflow;
         [SerializeField, Min(0)] private int _maxLines;
         [SerializeField] private TextBlockDirection _direction = TextBlockDirection.LeftToRight;
@@ -72,6 +74,13 @@ namespace TimboJimbo.UI.Text
         private float _measuredForWidth = float.NaN;
         private float _preferredWidth;
         private float _preferredHeight;
+
+        // Whether the layout no longer matches the text and how it is drawn: every such change reaches SetVerticesDirty,
+        // which marks it stale. The glyph rect's size and the canvas scale it was laid out at are compared as well, so
+        // a resize that marks nothing still lays it out again. Never saved: a reloaded text has no layout yet.
+        [NonSerialized] private bool _layoutStale = true;
+        [NonSerialized] private Vector2 _laidOutSize;
+        [NonSerialized] private float _laidOutScale;
 
         /// <summary>Raised with the link's href when a link in the text is clicked.</summary>
         public event Action<string> LinkClicked;
@@ -145,6 +154,19 @@ namespace TimboJimbo.UI.Text
             set { if (_wordWrap != value) { _wordWrap = value; MarkTextChanged(); } }
         }
 
+        /// <summary>
+        /// Lets a wrapped text break inside a word when a line is too narrow for it, as CSS overflow-wrap: anywhere
+        /// does: the minimum width it reports to a LayoutNode's layout is 0 rather than its longest word, so a Grow or
+        /// Fit node holding long unbroken words (URLs, CJK text without spaces) can shrink and wrap instead of
+        /// widening its row. Where lines break is still the generator's ICU line breaking; UGUI's layout gets a
+        /// minimum width of 0 either way.
+        /// </summary>
+        public bool BreakWordsAnywhere
+        {
+            get => _breakWordsAnywhere;
+            set { if (_breakWordsAnywhere != value) { _breakWordsAnywhere = value; SetLayoutDirty(); } }
+        }
+
         public TextBlockOverflow Overflow
         {
             get => _overflow;
@@ -194,7 +216,10 @@ namespace TimboJimbo.UI.Text
         /// <summary>True when the last layout cut the text short.</summary>
         public bool IsTruncated => _layout.IsElided;
 
-        /// <summary>The layout behind this text: the parsed document, the laid-out text and its queries, as of the last rebuild.</summary>
+        /// <summary>The font's line height (the distance between baselines) at the current font size, in local units.</summary>
+        public float LineHeight => TextLayout.LineHeightOf(_font, _fontSize);
+
+        /// <summary>The layout behind this text: the parsed document, the laid-out text and its queries, as of the last layout (see <see cref="EnsureLayout"/>).</summary>
         public TextLayout Layout => _layout;
 
         /// <summary>Marks every loaded text for a rebuild, for project-wide settings that change how texts draw.</summary>
@@ -207,7 +232,7 @@ namespace TimboJimbo.UI.Text
             }
         }
 
-        /// <summary>The parsed form of the current text (lines, runs, links and tokens, in source indices) as of the last rebuild.</summary>
+        /// <summary>The parsed form of the current text (lines, runs, links and tokens, in source indices) as of the last layout.</summary>
         public TextDocument Document => _layout.Document;
 
         /// <summary>Container for inline-content prefabs, above the glyphs.</summary>
@@ -338,8 +363,11 @@ namespace TimboJimbo.UI.Text
             return _layoutWrapped;
         }
 
-        /// <summary>The longest unbreakable run, so a wrapped text is never squeezed narrower than its longest word.</summary>
-        float TimboJimbo.UI.Layout.ILayoutMeasurable.MinWidth => _wordWrap ? LongestWordWidth() : LayoutUnwrapped().x;
+        /// <summary>
+        /// The longest unbreakable run, so a wrapped text is never squeezed narrower than its longest word; 0 when words
+        /// may break anywhere (<see cref="BreakWordsAnywhere"/>).
+        /// </summary>
+        float TimboJimbo.UI.Layout.ILayoutMeasurable.MinWidth => !_wordWrap ? LayoutUnwrapped().x : _breakWordsAnywhere ? 0f : LongestWordWidth();
 
         /// <summary>
         /// The size its LayoutNode is given: while the node's rect springs there, the text is laid out at it (wrapped
@@ -421,6 +449,7 @@ namespace TimboJimbo.UI.Text
             _measuresDirty = true;
             _longestWordDirty = true;
             _layoutMeasuresDirty = true;
+            _layoutStale = true;
             base.OnValidate();
         }
 
@@ -445,6 +474,7 @@ namespace TimboJimbo.UI.Text
             _measuresDirty = true;
             _longestWordDirty = true;
             _layoutMeasuresDirty = true;
+            _layoutStale = true;
             base.SetVerticesDirty();
         }
 
@@ -522,11 +552,80 @@ namespace TimboJimbo.UI.Text
         }
 
         // ---- Queries ----
+        // Source indices (with Rich Text off, UTF-16 indices into Text) and this component's local space (canvas units,
+        // y up), whatever its pivot and wherever a layout has arranged the text inside its rect. They answer for the
+        // last layout, which is made in the canvas rebuild: call EnsureLayout first when the text, its settings or the
+        // rect may have changed this frame. An index where a line wraps both ends the line before and starts the line
+        // after; the caret queries take it upstream, at the end of the line before, when asked to, as a caret's
+        // affinity does in UIKit and Flutter. A text field keeps that affinity with its caret: upstream after End, or
+        // after a tap past a wrapped line's end (GetIndexAt says so), and downstream after any other move.
 
         /// <summary>
-        /// Rectangles covering the source characters in [start, end), one per line, in this component's local
-        /// space (canvas units, y up), whatever its pivot and wherever a layout has arranged the text inside its rect.
-        /// Empty until the text has been laid out.
+        /// Lays the text out now if the text, how it is drawn or its rect changed since it was last laid out, so the
+        /// queries below answer for the current text and rect this frame rather than as of the last canvas rebuild.
+        /// Cheap when nothing changed; the rebuild that follows draws this layout rather than making it again. Call it
+        /// once layout has sized the rect for the frame (from Canvas.preWillRenderCanvases, after the layout pass).
+        /// </summary>
+        public void EnsureLayout()
+        {
+            EnsureChildren();
+            if (!_layoutStale && _glyphs.rectTransform.rect.size == _laidOutSize && CanvasScale == _laidOutScale)
+                return;
+            Generate();
+        }
+
+        /// <summary>
+        /// The caret at a source index: zero wide, at the insertion point, as tall as the line the index is on. An index
+        /// where a line wraps is drawn at the end of the line before when <paramref name="upstream"/>, otherwise at the
+        /// start of the line after; one after a final line break, on the empty line it ends with. In an empty text the
+        /// caret sits on the first line at the side the alignment names, as tall as <see cref="LineHeight"/>.
+        /// </summary>
+        public Rect GetCaretRect(int index, bool upstream = false)
+        {
+            var r = _layout.GetCaretRect(index, upstream);
+            var origin = LayoutOrigin();
+            return new Rect(origin.x + r.xMin, origin.y - r.yMax, 0f, r.height);
+        }
+
+        /// <summary>
+        /// The source index of the caret position nearest a point in local space, held within the text: a point above
+        /// the first line or below the last is matched on that line, and one past either end of a line takes that end.
+        /// </summary>
+        public int GetIndexAt(Vector2 localPoint) => GetIndexAt(localPoint, out _);
+
+        /// <summary>
+        /// The source index of the caret position nearest a point in local space, as <see cref="GetIndexAt(Vector2)"/>,
+        /// and whether to take it upstream: true when the point is on a wrapped line past its end, whose nearest position
+        /// is the index the next line starts at.
+        /// </summary>
+        public int GetIndexAt(Vector2 localPoint, out bool upstream)
+        {
+            var origin = LayoutOrigin();
+            return _layout.GetIndexAt(new Vector2(localPoint.x - origin.x, origin.y - localPoint.y), out upstream);
+        }
+
+        /// <summary>How many lines the text has: at least 1, and a text ending in a line break ends with an empty line.</summary>
+        public int LineCount => _layout.LineCount;
+
+        /// <summary>
+        /// The line a source index is on, counted from 0. An index where a line wraps is on the line before when
+        /// <paramref name="upstream"/>, otherwise on the line after.
+        /// </summary>
+        public int GetLineAt(int index, bool upstream = false) => _layout.GetLineAt(index, upstream);
+
+        /// <summary>The source index of a line's first character; a line past the last starts at the text's end.</summary>
+        public int GetLineStart(int line) => _layout.GetLineStart(line);
+
+        /// <summary>
+        /// The source index at the end of a line's text, before its line break if it ends in one. A line that wraps ends
+        /// at the index the next one starts at; take it upstream (<see cref="GetCaretRect"/>, <see cref="GetLineAt"/>)
+        /// to keep it on this line.
+        /// </summary>
+        public int GetLineEnd(int line) => _layout.GetLineEnd(line);
+
+        /// <summary>
+        /// Rectangles covering the source characters in [start, end), one per line; a text with nothing to draw (only
+        /// spaces or line breaks) answers too. Empty until the text has been laid out.
         /// </summary>
         public void GetCharacterRects(int start, int end, List<Rect> results)
         {
@@ -534,17 +633,24 @@ namespace TimboJimbo.UI.Text
             if (_glyphs == null)
                 return;
             _layout.GetSourceRangeRects(start, end, s_Rects);
-            // The text is laid out on the glyph child, from its rect's top-left corner (see BuildGeometry). That child is
-            // this component's own, never turned or scaled, so its space is this one moved by where its pivot sits in it:
-            // its local position, wherever PlaceChild put it (over this rect, or at an arranged size inside it).
-            var rect = _glyphs.GetPixelAdjustedRect();
-            Vector2 origin = _glyphs.rectTransform.localPosition;
-            float left = origin.x + rect.xMin, top = origin.y + rect.yMax;
+            var origin = LayoutOrigin();
             for (int i = 0; i < s_Rects.Count; i++)
             {
                 var r = s_Rects[i];
-                results.Add(new Rect(left + r.xMin, top - r.yMax, r.width, r.height));
+                results.Add(new Rect(origin.x + r.xMin, origin.y - r.yMax, r.width, r.height));
             }
+        }
+
+        // Where layout space (canvas units from the text's top-left corner, y down) starts in local space. The text is
+        // laid out on the glyph child, from its rect's top-left corner (see BuildGeometry). That child is this
+        // component's own, never turned or scaled, so its space is this one moved by where its pivot sits in it: its
+        // local position, wherever PlaceChild put it (over this rect, or at an arranged size inside it).
+        private Vector2 LayoutOrigin()
+        {
+            EnsureChildren();
+            var rect = _glyphs.GetPixelAdjustedRect();
+            Vector2 origin = _glyphs.rectTransform.localPosition;
+            return new Vector2(origin.x + rect.xMin, origin.y + rect.yMax);
         }
 
         // ---- Links ----
@@ -579,13 +685,16 @@ namespace TimboJimbo.UI.Text
             RebuildGlyphs();
         }
 
-        /// <summary>Regenerates the layout, hands the glyph geometry to the child renderer and places inline content.</summary>
+        /// <summary>
+        /// Lays the text out unless the last layout still matches it (see <see cref="EnsureLayout"/>), hands the glyph
+        /// geometry to the child renderer and places inline content.
+        /// </summary>
         internal void RebuildGlyphs()
         {
-            EnsureChildren();
             ClearGeometry();
 
-            if (Generate())
+            EnsureLayout();
+            if (_layout.HasContent)
                 BuildGeometry();
             _glyphs.Apply(s_Positions, s_Colors, s_Uv0, s_Uv1, s_GroupTriangles, s_Materials);
 
@@ -602,13 +711,18 @@ namespace TimboJimbo.UI.Text
             }
         }
 
-        private bool Generate()
+        private void Generate()
         {
             // The layout gets the rect as sized, not the pixel-adjusted one: on a pixel-perfect canvas the
             // adjustment can take up to a pixel off the width a text was measured to fit exactly, and the
             // last word would wrap. The geometry is placed on the adjusted rect. It is the glyph child's rect: its
             // own, or the size layout arranged it at (see PlaceChild).
             var rect = _glyphs.rectTransform.rect;
+            float scale = CanvasScale;
+            // Fresh from here on: a change made while it is laid out (a handler dirtying it) marks it stale again.
+            _layoutStale = false;
+            _laidOutSize = rect.size;
+            _laidOutScale = scale;
             var input = TextLayoutInput.Default;
             input.Text = _text;
             input.RichText = _richText;
@@ -618,7 +732,7 @@ namespace TimboJimbo.UI.Text
             input.WidthPx = rect.width;
             input.HeightPx = rect.height;
             // The anti-aliasing margin is one device pixel, expressed in canvas units.
-            input.AntiAliasMarginPx = 1f / CanvasScale;
+            input.AntiAliasMarginPx = 1f / scale;
             input.WordWrap = _wordWrap;
             input.Alignment = _alignment;
             input.Overflow = _overflow;
@@ -633,7 +747,7 @@ namespace TimboJimbo.UI.Text
             input.Strikethrough = _strikethrough;
             input.IcuData = _icuData;
             var context = new InlineContext(this, _fontSize, color);
-            return _layout.Generate(in input, in context);
+            _layout.Generate(in input, in context);
         }
     }
 

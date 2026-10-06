@@ -229,6 +229,23 @@ namespace TimboJimbo.UI.Text.Markup
             return _sourceLength;
         }
 
+        /// <summary>
+        /// The source index just after the last shown source character before a layout index: where a position that
+        /// ends a run of text belongs, such as the end of a line, rather than at the next shown character past text the
+        /// layout inserted or markup it hides. With no source shown before it, as <see cref="ToSource"/>.
+        /// </summary>
+        public int ToSourceEnd(int layoutIndex)
+        {
+            for (int i = _segments.Count - 1; i >= 0; i--)
+            {
+                var s = _segments[i];
+                if (s.SourceStart < 0 || s.LayoutStart >= layoutIndex)
+                    continue;
+                return s.SourceStart + System.Math.Min(layoutIndex - s.LayoutStart, s.Length);
+            }
+            return ToSource(layoutIndex);
+        }
+
         private void Clear()
         {
             _text.Clear();

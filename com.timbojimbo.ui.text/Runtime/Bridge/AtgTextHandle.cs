@@ -28,6 +28,7 @@ namespace TimboJimbo.UI.Text.Bridge
         }
 
         private IntPtr _info;
+        private bool _laidOut;
         private NativeSettings _native = NativeSettings.Default;
         private NativeTextInfo _lastInfo;
         private bool _uvsAreGenerated;
@@ -44,19 +45,25 @@ namespace TimboJimbo.UI.Text.Bridge
         /// <summary>Extent of the laid-out text in pixels, from the last <see cref="Generate"/>.</summary>
         public Vector2 SizePx { get; private set; }
 
+        /// <summary>
+        /// True when the last <see cref="Generate"/> laid a text out, including one with nothing to draw (spaces, line
+        /// breaks): the queries below answer for that text. False before the first layout and after an empty text, a
+        /// text with no usable font or <see cref="Clear"/>, when they answer as for an empty text.
+        /// </summary>
+        public bool IsLaidOut => _laidOut;
+
         public int GroupCount => _groups.Count;
 
         public AtgQuadGroup GetGroup(int index) => _groups[index].Info;
 
         /// <summary>
         /// Lays the text out and prepares its quads. Returns false when there is nothing to draw (empty text, no
-        /// usable font). Missing glyphs are rasterised into the font atlases on the way.
+        /// usable font, or only spaces and line breaks, which are still laid out for the queries). Missing glyphs are
+        /// rasterised into the font atlases on the way.
         /// </summary>
         public bool Generate(ref AtgTextSettings settings)
         {
-            _groups.Clear();
-            IsElided = false;
-            SizePx = Vector2.zero;
+            Clear();
 
             if (string.IsNullOrEmpty(settings.Text) || AtgEngine.IsShuttingDown)
                 return false;
@@ -73,6 +80,7 @@ namespace TimboJimbo.UI.Text.Bridge
             var lib = AtgEngine.Lib;
             bool wasCached = false;
             _lastInfo = lib.GenerateText(_native, _info, ref wasCached);
+            _laidOut = true;
             if (!wasCached)
                 _uvsAreGenerated = false;
             IsElided = _lastInfo.isElided;
@@ -136,6 +144,18 @@ namespace TimboJimbo.UI.Text.Bridge
             return _groups.Count > 0;
         }
 
+        /// <summary>
+        /// Forgets the last layout while keeping the native state for the next one: nothing to draw, no size, and the
+        /// queries answer as for an empty text rather than for whatever was laid out before.
+        /// </summary>
+        public void Clear()
+        {
+            _groups.Clear();
+            _laidOut = false;
+            IsElided = false;
+            SizePx = Vector2.zero;
+        }
+
         /// <summary>Reads one quad of a group produced by the last <see cref="Generate"/>.</summary>
         public void GetQuad(int groupIndex, int quadIndex, out AtgQuad quad)
         {
@@ -164,50 +184,73 @@ namespace TimboJimbo.UI.Text.Bridge
         }
 
         // ---- Queries on the last layout ----
+        // Indices are UTF-16 offsets into the laid-out text, at code point boundaries (UI Toolkit hands the engine
+        // indices it has checked with GetValidPointIndex), and positions are layout pixels, y down from the layout's
+        // top-left corner. With nothing laid out (see IsLaidOut) they answer as for an empty text, never reaching the
+        // engine without a layout to ask.
 
-        public int CharacterCount => _info != IntPtr.Zero ? TextLib.GetCharacterCount(_info) : 0;
+        public int CharacterCount => _laidOut ? TextLib.GetCharacterCount(_info) : 0;
 
-        public bool IsRightToLeft => _info != IntPtr.Zero && TextLib.IsMainDirectionRTL(_info);
+        public bool IsRightToLeft => _laidOut && TextLib.IsMainDirectionRTL(_info);
 
         /// <summary>The link id under a point in layout pixels, or -1.</summary>
-        public int LinkAt(Vector2 pointPx) => _info != IntPtr.Zero ? TextLib.FindIntersectingLink(pointPx, _info) : -1;
+        public int LinkAt(Vector2 pointPx) => _laidOut ? TextLib.FindIntersectingLink(pointPx, _info) : -1;
 
         /// <summary>Rectangles covering the characters in [start, end), one per line, in layout pixels.</summary>
         public void GetRangeRects(int start, int end, List<Rect> results)
         {
             results.Clear();
-            if (_info == IntPtr.Zero || end <= start)
+            if (!_laidOut || end <= start)
                 return;
             var rects = TextSelectionService.GetHighlightRectangles(_info, start, end);
             if (rects != null)
                 results.AddRange(rects);
         }
 
-        /// <summary>Caret position for a character index, in layout pixels.</summary>
-        public Vector2 CursorPositionPx(int index) => TextSelectionService.GetCursorPositionFromLogicalIndex(_info, index);
+        /// <summary>
+        /// The caret's position before a character index, in layout pixels: x at the insertion point, y at the caret's
+        /// bottom (y runs down). See <see cref="CaretRectPx"/> for the whole caret.
+        /// </summary>
+        public Vector2 CursorPositionPx(int index) => _laidOut ? TextSelectionService.GetCursorPositionFromLogicalIndex(_info, index) : Vector2.zero;
+
+        /// <summary>
+        /// The caret before a character index, in layout pixels: zero wide, at the insertion point, rising from its
+        /// bottom by the height of the character there. The engine reports the caret's bottom, y down; UI Toolkit draws
+        /// its own caret upwards from it by that height (TextElement.DrawCaret in 6000.5 builds
+        /// Rect(x, y - characterHeight, width, characterHeight) from the same two calls), and so does this.
+        /// </summary>
+        public Rect CaretRectPx(int index)
+        {
+            if (!_laidOut)
+                return default;
+            var bottom = TextSelectionService.GetCursorPositionFromLogicalIndex(_info, index);
+            float height = TextSelectionService.GetCharacterHeightFromIndex(_info, index);
+            return new Rect(bottom.x, bottom.y - height, 0f, height);
+        }
 
         /// <summary>The character index nearest a point in layout pixels.</summary>
-        public int IndexAt(Vector2 pointPx) => TextSelectionService.GetCursorLogicalIndexFromPosition(_info, pointPx);
+        public int IndexAt(Vector2 pointPx) => _laidOut ? TextSelectionService.GetCursorLogicalIndexFromPosition(_info, pointPx) : 0;
 
-        public int LineOf(int index) => TextSelectionService.GetLineNumber(_info, index);
+        /// <summary>The line a character is on, counted from 0.</summary>
+        public int LineOf(int index) => _laidOut ? TextSelectionService.GetLineNumber(_info, index) : 0;
 
-        public float LineHeightPx(int line) => TextSelectionService.GetLineHeight(_info, line);
+        public float LineHeightPx(int line) => _laidOut ? TextSelectionService.GetLineHeight(_info, line) : 0f;
 
-        public int FirstIndexOnLine(int index) => TextSelectionService.GetFirstCharacterIndexOnLine(_info, index);
+        public int FirstIndexOnLine(int index) => _laidOut ? TextSelectionService.GetFirstCharacterIndexOnLine(_info, index) : 0;
 
-        public int LastIndexOnLine(int index) => TextSelectionService.GetLastCharacterIndexOnLine(_info, index);
+        public int LastIndexOnLine(int index) => _laidOut ? TextSelectionService.GetLastCharacterIndexOnLine(_info, index) : 0;
 
         /// <summary>How many characters of the last layout fit within a width, for "read more" style truncation.</summary>
-        public int CharactersThatFit(float widthPx) => TextLib.GetNumCharactersThatFitWithinWidth(_info, Mathf.RoundToInt(widthPx * FixedPoint));
+        public int CharactersThatFit(float widthPx) => _laidOut ? TextLib.GetNumCharactersThatFitWithinWidth(_info, Mathf.RoundToInt(widthPx * FixedPoint)) : 0;
 
         public void Dispose()
         {
+            Clear();
             if (_info == IntPtr.Zero)
                 return;
             TextGenerationInfo.Destroy(_info);
             _info = IntPtr.Zero;
             _uvsAreGenerated = false;
-            _groups.Clear();
         }
 
         // ---- Internals ----
